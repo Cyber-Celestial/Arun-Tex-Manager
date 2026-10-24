@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "The Arun Tex Operations"
+description = "An operations workspace for The Arun Tex to reconcile daily B2C sales, track wholesale dispatch compliance, and manage employee attendance and payroll."
+version = "1.0.0"
+id = "artifacts/arun-tex-management"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18354
+
+[services.development]
+run = "pnpm --filter @workspace/arun-tex-management run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/arun-tex-management", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/arun-tex-management/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18354"
+BASE_PATH = "/"
