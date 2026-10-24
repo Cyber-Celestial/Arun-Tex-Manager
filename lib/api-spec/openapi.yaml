@@ -3,13 +3,17 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: The Arun Tex operations workspace API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: workspace
+    description: Authenticated operations workspace data and user roles
+  - name: storage
+    description: Private dispatch document uploads
 paths:
   /healthz:
     get:
@@ -24,6 +28,309 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /workspace/me:
+    get:
+      operationId: getWorkspaceMe
+      tags: [workspace]
+      summary: Return the signed-in user's workspace role
+      responses:
+        "200":
+          description: Workspace membership
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceUser"
+        "401":
+          description: Sign-in required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /workspace/state:
+    get:
+      operationId: getWorkspaceState
+      tags: [workspace]
+      summary: Return the operations data visible to the user's role
+      responses:
+        "200":
+          description: Operations state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceState"
+        "401":
+          description: Sign-in required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Workspace access has not been assigned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /workspace/data/b2c:
+    put:
+      operationId: updateB2cState
+      tags: [workspace]
+      summary: Save B2C reconciliation data
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModuleStateInput"
+      responses:
+        "200":
+          description: Updated B2C state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModuleStateResponse"
+        "400":
+          description: Invalid B2C state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Insufficient role or stale update
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Workspace state changed in another session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /workspace/data/dispatch:
+    put:
+      operationId: updateDispatchState
+      tags: [workspace]
+      summary: Save B2B dispatch tracking data
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModuleStateInput"
+      responses:
+        "200":
+          description: Updated dispatch state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModuleStateResponse"
+        "400":
+          description: Invalid dispatch state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Insufficient role or stale update
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Workspace state changed in another session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /workspace/data/hr:
+    put:
+      operationId: updateHrState
+      tags: [workspace]
+      summary: Save HR, attendance, roster, and advance data
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModuleStateInput"
+      responses:
+        "200":
+          description: Updated HR state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModuleStateResponse"
+        "400":
+          description: Invalid HR state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Admin role required or stale update
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Workspace state changed in another session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /workspace/data/hr/attendance:
+    put:
+      operationId: updateAttendanceState
+      tags: [workspace]
+      summary: Save attendance exceptions without changing payroll master data
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModuleStateInput"
+      responses:
+        "200":
+          description: Updated attendance state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModuleStateResponse"
+        "400":
+          description: Invalid attendance state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Insufficient role or stale update
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Workspace state changed in another session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /workspace/users:
+    get:
+      operationId: listWorkspaceUsers
+      tags: [workspace]
+      summary: List workspace accounts for Admin role management
+      responses:
+        "200":
+          description: Workspace users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WorkspaceUser"
+        "403":
+          description: Admin role required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /workspace/users/{userId}:
+    patch:
+      operationId: updateWorkspaceUserRole
+      tags: [workspace]
+      summary: Change a user's role
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkspaceRoleInput"
+      responses:
+        "200":
+          description: Updated workspace user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceUser"
+        "403":
+          description: Admin role required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Workspace user not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /storage/uploads/request-url:
+    post:
+      operationId: requestUploadUrl
+      tags: [storage]
+      summary: Request a private file upload URL
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadUrlInput"
+      responses:
+        "200":
+          description: Upload URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadUrlResponse"
+        "400":
+          description: Invalid upload metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Sign-in required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /storage/objects/{objectPath}:
+    get:
+      operationId: getStorageObject
+      tags: [storage]
+      summary: Serve a private dispatch document
+      parameters:
+        - name: objectPath
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Private document content
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
+        "401":
+          description: Sign-in required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: File not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +340,95 @@ components:
           type: string
       required:
         - status
+    ApiError:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+    WorkspaceUser:
+      type: object
+      properties:
+        userId:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+          enum: [admin, billing, accounts, pending]
+        createdAt:
+          type: string
+          format: date-time
+      required: [userId, name, email, role, createdAt]
+    WorkspaceRoleInput:
+      type: object
+      properties:
+        role:
+          type: string
+          enum: [admin, billing, accounts, pending]
+      required: [role]
+    WorkspaceModule:
+      type: object
+      additionalProperties: true
+    WorkspaceState:
+      type: object
+      properties:
+        version:
+          type: integer
+        user:
+          $ref: "#/components/schemas/WorkspaceUser"
+        b2c:
+          $ref: "#/components/schemas/WorkspaceModule"
+        dispatch:
+          $ref: "#/components/schemas/WorkspaceModule"
+        hr:
+          $ref: "#/components/schemas/WorkspaceModule"
+      required: [version, user, b2c, dispatch, hr]
+    ModuleStateInput:
+      type: object
+      properties:
+        expectedVersion:
+          type: integer
+          minimum: 0
+        data:
+          $ref: "#/components/schemas/WorkspaceModule"
+      required: [expectedVersion, data]
+    ModuleStateResponse:
+      type: object
+      properties:
+        version:
+          type: integer
+        data:
+          $ref: "#/components/schemas/WorkspaceModule"
+      required: [version, data]
+    UploadUrlInput:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        size:
+          type: integer
+          minimum: 1
+        contentType:
+          type: string
+          minLength: 1
+      required: [name, size, contentType]
+    UploadUrlResponse:
+      type: object
+      properties:
+        uploadURL:
+          type: string
+          format: uri
+        objectPath:
+          type: string
+        name:
+          type: string
+        size:
+          type: integer
+        contentType:
+          type: string
+      required: [uploadURL, objectPath, name, size, contentType]
 

@@ -1,62 +1,439 @@
-import { type ReactNode } from 'react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
+import { ClerkProvider, SignIn, SignUp, useClerk, useUser } from '@clerk/react';
+import { publishableKeyFromHost } from '@clerk/react/internal';
+import { shadcn } from '@clerk/themes';
+import * as XLSX from 'xlsx';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
 import {
-  Route,
-  Switch,
-  useLocation,
-  Router as WouterRouter,
-} from 'wouter';
+  getGetWorkspaceMeQueryKey, getGetWorkspaceStateQueryKey, getListWorkspaceUsersQueryKey, useGetWorkspaceMe,
+  useGetWorkspaceState, useListWorkspaceUsers, useRequestUploadUrl, useUpdateAttendanceState,
+  useUpdateB2cState, useUpdateDispatchState, useUpdateHrState,
+  useUpdateWorkspaceUserRole,
+} from '@workspace/api-client-react';
+import type { WorkspaceState, WorkspaceUser } from '@workspace/api-client-react';
+import { Link, Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
+import {
+  Activity, ArrowRight, ArrowUpRight, Banknote, Bell, Check,
+  CheckCircle2, CircleAlert, ClipboardCheck, Clock3, FileDown,
+  FileSpreadsheet, FileText, LayoutDashboard, LogOut, Menu, PackageCheck,
+  Printer, Search, ShieldCheck, Shirt, Users, Wallet, X,
+} from 'lucide-react';
 
 const queryClient = new QueryClient();
+const basePath = import.meta.env.BASE_URL.replace(/\/$/, '');
+const clerkPubKey = publishableKeyFromHost(window.location.hostname, import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
+const clerkProxyUrl = import.meta.env.VITE_CLERK_PROXY_URL;
+function stripBase(path: string) { return basePath && path.startsWith(basePath) ? path.slice(basePath.length) || '/' : path; }
+const clerkAppearance = {
+  theme: shadcn, cssLayerName: 'clerk',
+  options: { logoPlacement: 'inside' as const, logoLinkUrl: basePath || '/', logoImageUrl: `${window.location.origin}${basePath}/logo.svg` },
+  variables: { colorPrimary: '#246451', colorForeground: '#292d37', colorMutedForeground: '#747779', colorDanger: '#a43c35', colorBackground: '#fffdf7', colorInput: '#fffdf7', colorInputForeground: '#292d37', colorNeutral: '#e4ded1', fontFamily: 'DM Sans, sans-serif', borderRadius: '0.7rem' },
+  elements: {
+    rootBox: 'w-full flex justify-center', cardBox: 'bg-[#fffdf7] rounded-2xl w-[440px] max-w-full overflow-hidden border border-[#e4ded1]',
+    card: '!shadow-none !border-0 !bg-transparent !rounded-none', footer: '!shadow-none !border-0 !bg-transparent !rounded-none',
+    headerTitle: 'text-[#292d37] font-bold', headerSubtitle: 'text-[#747779]', socialButtonsBlockButtonText: 'text-[#292d37] font-semibold',
+    formFieldLabel: 'text-[#292d37] font-semibold', footerActionLink: 'text-[#246451] font-semibold', footerActionText: 'text-[#747779]',
+    dividerText: 'text-[#747779]', identityPreviewEditButton: 'text-[#246451]', formFieldSuccessText: 'text-[#246451]', alertText: 'text-[#292d37]',
+    logoBox: 'mb-4', logoImage: 'rounded-md', socialButtonsBlockButton: 'border-[#e4ded1] bg-[#fbf9f2]',
+    formButtonPrimary: 'bg-[#246451] hover:bg-[#194e3e] text-white', formFieldInput: 'border-[#e4ded1] bg-[#fffdf7] text-[#292d37]',
+    footerAction: 'text-[#747779]', dividerLine: 'bg-[#e4ded1]', alert: 'bg-[#fbf1e9] border-[#ead6c3]',
+    otpCodeFieldInput: 'border-[#e4ded1]', formFieldRow: 'mb-4', main: 'text-[#292d37]',
+  },
+};
 
-function Home() {
-  return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-gray-50">
-      <div className="text-center">
-        <h1 className="text-2xl font-bold text-gray-900">
-          Replit Agent is building...
-        </h1>
-        <p className="mt-2 text-sm text-gray-600">
-          Your app will appear here once it's ready.
-        </p>
-      </div>
+type AnyObj = Record<string, any>;
+type Role = 'admin' | 'billing' | 'accounts' | 'pending';
+const money = (n: unknown) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(Number(n) || 0);
+const shortDate = (d: string) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '—';
+const arr = (v: unknown): AnyObj[] => Array.isArray(v) ? v : [];
+const cleanName = (s: string) => s.split(/(?=[A-Z])/).join(' ').replace(/^./, x => x.toUpperCase());
+const normalizeColumn = (value: unknown) => String(value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+function readField(row: Record<string, unknown>, ...labels: string[]) {
+  const candidates = labels.map(normalizeColumn);
+  const entry = Object.entries(row).find(([key]) => {
+    const normalized = normalizeColumn(key);
+    return candidates.some(candidate => normalized === candidate || normalized.includes(candidate));
+  });
+  return entry?.[1];
+}
+function dateCell(value: unknown) {
+  if (value instanceof Date && !Number.isNaN(value.valueOf())) return value.toISOString().slice(0, 10);
+  if (typeof value === 'number') {
+    const parsed = XLSX.SSF.parse_date_code(value);
+    if (parsed) return `${parsed.y}-${String(parsed.m).padStart(2, '0')}-${String(parsed.d).padStart(2, '0')}`;
+  }
+  const text = String(value ?? '').trim();
+  const indian = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
+  if (indian) {
+    const year = indian[3].length === 2 ? `20${indian[3]}` : indian[3];
+    return `${year}-${indian[2].padStart(2, '0')}-${indian[1].padStart(2, '0')}`;
+  }
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.valueOf()) ? '' : parsed.toISOString().slice(0, 10);
+}
+function downloadTallyWorkbook(exportData: AnyObj, fallbackDate = 'batch') {
+  const workbook = XLSX.utils.book_new();
+  const sheet = XLSX.utils.json_to_sheet(arr(exportData.entries));
+  XLSX.utils.book_append_sheet(workbook, sheet, 'Tally Vouchers');
+  XLSX.writeFile(workbook, String(exportData.fileName || `arun-tex-tally-${fallbackDate}.xlsx`));
+}
+function makeTallyExport(batch: AnyObj) {
+  const entries = arr(batch.transactions).flatMap(transaction => {
+    const amount = Math.abs(Number(transaction.totalInvoiceAmount) || 0);
+    const isReturn = transaction.type === 'Return';
+    const date = dateCell(transaction.date);
+    const voucherNumber = String(transaction.invoiceNumber || '');
+    const voucherType = isReturn ? 'Credit Note' : 'Sales';
+    const salesLine = {
+      Date: date,
+      'Voucher Type': voucherType,
+      'Voucher Number': voucherNumber,
+      'Ledger Name': 'Vastra Tax Invoice B2C',
+      Debit: isReturn ? amount : '',
+      Credit: isReturn ? '' : amount,
+    };
+    if (isReturn) {
+      return [salesLine, {
+        Date: date, 'Voucher Type': voucherType, 'Voucher Number': voucherNumber,
+        'Ledger Name': 'Cash', Debit: '', Credit: amount,
+      }];
+    }
+    const receipts = [
+      ['Cash', Number(transaction.cashAmount) || 0],
+      ['HDFC UPI', Number(transaction.upiAmount) || 0],
+      ['HDFC Card', Number(transaction.cardAmount) || 0],
+    ].filter(([, value]) => Number(value) > 0);
+    return [salesLine, ...receipts.map(([ledger, value]) => ({
+      Date: date,
+      'Voucher Type': voucherType,
+      'Voucher Number': voucherNumber,
+      'Ledger Name': ledger,
+      Debit: value,
+      Credit: '',
+    }))];
+  });
+  const date = dateCell(batch.date) || new Date().toISOString().slice(0, 10);
+  return {
+    fileName: `arun-tex-tally-${date}.xlsx`,
+    generatedAt: new Date().toISOString(),
+    entries,
+  };
+}
+
+function AuthPage({ mode }: { mode: 'in' | 'up' }) {
+  return <main className="auth-surface">
+    <div className="auth-aside">
+      <Link href="/" className="brand-lockup"><span className="brand-mark"><Shirt size={20}/></span><span>The Arun Tex<small>OPERATIONS</small></span></Link>
+      <div className="auth-story"><span className="eyebrow">A steadier close, every day</span><h1 className="display">From the first invoice<br/>to the final tally.</h1><p>One clear room for sales, dispatch and people operations.</p></div>
+      <div className="auth-foot">BUILT FOR THE WORK BEHIND EVERY WEAVE <span>•</span> SURAT, INDIA</div>
+      <div className="auth-weave" aria-hidden="true"><i/><i/><i/><i/><i/><i/></div>
     </div>
-  );
+    <div className="auth-card-wrap"><div className="auth-topline">THE ARUN TEX <span>WORKSPACE ACCESS</span></div>
+      {mode === 'in' ? <SignIn routing="path" path={`${basePath}/sign-in`} signUpUrl={`${basePath}/sign-up`} /> : <SignUp routing="path" path={`${basePath}/sign-up`} signInUrl={`${basePath}/sign-in`} />}
+      <Link href="/" className="auth-back">← Return to workspace overview</Link>
+    </div>
+  </main>;
 }
 
-function Router() {
-  return (
-    // Keep a shared shell (sidebar, navbar) outside the boundary so it
-    // survives a page crash.
-    <RoutedErrorBoundary>
-      <Switch>
-        <Route path="/" component={Home} />
-        <Route component={NotFound} />
-      </Switch>
-    </RoutedErrorBoundary>
-  );
+function ClerkCacheInvalidator() {
+  const { addListener } = useClerk(); const qc = useQueryClient();
+  const last = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    const unsubscribe = addListener(({ user }) => { const id = user?.id ?? null; if (last.current !== undefined && last.current !== id) qc.clear(); last.current = id; });
+    return unsubscribe;
+  }, [addListener, qc]);
+  return null;
 }
 
-function RoutedErrorBoundary({ children }: { children: ReactNode }) {
-  const [location] = useLocation();
-  return <ErrorBoundary resetKey={location}>{children}</ErrorBoundary>;
+function StatusPill({ children, tone = 'neutral' }: { children: ReactNode; tone?: 'neutral'|'good'|'warn'|'bad'|'gold' }) {
+  return <span className={`pill pill-${tone}`}><i/>{children}</span>;
+}
+function Button({ children, onClick, kind = 'secondary', disabled = false, className = '', title }: { children: ReactNode; onClick?: () => void; kind?: 'primary'|'secondary'|'quiet'|'danger'; disabled?: boolean; className?: string; title?: string }) {
+  return <button data-testid={`button-${String(children).replace(/[^a-z0-9]+/gi,'-').toLowerCase().slice(0,28)}`} title={title} disabled={disabled} onClick={onClick} className={`btn btn-${kind} ${className}`}>{children}</button>;
+}
+function Panel({ children, className = '' }: { children: ReactNode; className?: string }) { return <section className={`panel ${className}`}>{children}</section>; }
+function PanelHeading({ kicker, title, action }: { kicker?: string; title: string; action?: ReactNode }) {
+  return <div className="panel-heading"><div>{kicker && <div className="eyebrow">{kicker}</div>}<h2>{title}</h2></div>{action}</div>;
+}
+function Metric({ label, value, note, icon: Icon, color = 'teal' }: { label: string; value: string; note: string; icon: typeof Activity; color?: string }) {
+  return <div className="metric"><div className={`metric-icon ${color}`}><Icon size={18}/></div><div className="metric-label">{label}</div><strong className="mono">{value}</strong><small>{note}</small></div>;
+}
+function TableEmpty({ text }: { text: string }) { return <div className="empty-state"><span><CheckCircle2 size={20}/></span><strong>All clear</strong><p>{text}</p></div>; }
+function DocumentUpload({ label, disabled, onUploaded }: {label:string;disabled:boolean;onUploaded:(path:string)=>void}) {
+  const upload=useRequestUploadUrl(); const [message,setMessage]=useState('');
+  const choose=(file?:File)=>{
+    if(!file)return;
+    setMessage('Preparing upload…');
+    upload.mutate({data:{name:file.name,size:file.size,contentType:file.type||'application/octet-stream'}},{
+      onSuccess:async result=>{
+        try{
+          const response=await fetch(result.uploadURL,{method:'PUT',headers:{'Content-Type':file.type||'application/octet-stream'},body:file});
+          if(!response.ok)throw new Error('Upload failed');
+          onUploaded(result.objectPath);setMessage('Attached');
+        }catch{setMessage('Upload failed. Try again.');}
+      },
+      onError:()=>setMessage('Upload failed. Try again.'),
+    });
+  };
+  return <label className="doc-upload"><span>{label}</span><input type="file" accept="application/pdf" disabled={disabled||upload.isPending} onChange={e=>choose(e.target.files?.[0])}/><small>{message||'PDF only'}</small></label>;
 }
 
+const navItems = [
+  { path: '/', label: 'Overview', icon: LayoutDashboard, section: 'WORKSPACE' },
+  { path: '/reconciliation', label: 'Reconciliation', icon: Banknote, section: 'DAILY OPERATIONS' },
+  { path: '/dispatch', label: 'B2B dispatch', icon: PackageCheck },
+  { path: '/people', label: 'People & attendance', icon: Users, section: 'PEOPLE' },
+  { path: '/payroll', label: 'Payroll', icon: Wallet },
+  { path: '/team', label: 'Team access', icon: ShieldCheck, section: 'ADMINISTRATION', admin: true },
+];
+function AppShell({ children, role, name }: { children: ReactNode; role: Role; name: string }) {
+  const [loc] = useLocation(); const [mobileNav, setMobileNav] = useState(false); const { signOut } = useClerk();
+  const display = name?.trim() || 'Workspace member';
+  return <div className="app-shell shell-grain">
+    <aside className={`sidebar ${mobileNav ? 'sidebar-open' : ''}`}>
+      <Link href="/" className="brand-lockup"><span className="brand-mark"><Shirt size={20}/></span><span>The Arun Tex<small>OPERATIONS</small></span></Link>
+      <div className="sidebar-caption">DAY-END OPERATIONS</div>
+      <nav className="side-nav">{navItems.filter(item => (!item.admin || role === 'admin') && (role === 'admin' || (role === 'billing' && ['/', '/reconciliation', '/dispatch'].includes(item.path)) || (role === 'accounts' && ['/', '/people', '/payroll'].includes(item.path)) || (role === 'pending' && item.path === '/'))).map(item => <div key={item.path}>
+        {item.section && <div className="nav-section">{item.section}</div>}
+        <Link href={item.path} onClick={() => setMobileNav(false)} className={`nav-link ${loc === item.path ? 'active' : ''}`} data-testid={`link-${item.label.toLowerCase().replace(/[^a-z]+/g,'-')}`}><item.icon size={17}/><span>{item.label}</span>{item.path === '/reconciliation' && <span className="nav-dot"/>}</Link>
+      </div>)}</nav>
+      <div className="sidebar-bottom"><div className="sync-note"><span className="sync-light"/><span>Workspace synced<small>Numbers stay in step</small></span><Check size={14}/></div><div className="profile-mini"><div className="avatar">{display.slice(0,1).toUpperCase()}</div><div className="profile-copy"><strong>{display}</strong><small>{cleanName(role)} access</small></div><button title="Sign out" className="icon-button" onClick={() => signOut({ redirectUrl: basePath || '/' })} data-testid="button-sign-out"><LogOut size={16}/></button></div></div>
+    </aside>
+    {mobileNav && <button aria-label="Close navigation" className="mobile-scrim" onClick={() => setMobileNav(false)} data-testid="button-close-menu"/>}
+    <div className="main-column"><header className="topbar"><button className="icon-button mobile-menu" aria-label="Open navigation" onClick={() => setMobileNav(true)} data-testid="button-open-menu"><Menu size={19}/></button><div className="crumb"><span>ARUN TEX</span><span className="crumb-slash">/</span><span>{navItems.find(n => n.path === loc)?.label ?? 'Workspace'}</span></div><div className="topbar-right"><span className="live-clock"><i/> LIVE WORKSPACE</span><button className="icon-button bell-button" aria-label="Notifications" title="Operations alerts" data-testid="button-notifications"><Bell size={17}/><i/></button><div className="top-avatar">{display.slice(0,1).toUpperCase()}</div></div></header>
+      <main className="page-content enter">{children}</main>
+      <footer className="page-footer"><span>THE ARUN TEX <i>•</i> OPERATIONS ROOM</span><span>MADE FOR A BETTER CLOSE</span></footer>
+    </div>
+  </div>;
+}
+
+function useWorkspace() {
+  const query = useGetWorkspaceState({ query: { queryKey: getGetWorkspaceStateQueryKey() } });
+  const me = useGetWorkspaceMe({ query: { queryKey: getGetWorkspaceMeQueryKey() } });
+  const qc = useQueryClient();
+  const b2c = useUpdateB2cState({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,b2c:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); } } });
+  const dispatch = useUpdateDispatchState({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,dispatch:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); } } });
+  const hr = useUpdateHrState({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,hr:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); } } });
+  const attendance = useUpdateAttendanceState({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,hr:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); } } });
+  return { query, me, b2c, dispatch, hr, attendance };
+}
+function LoadingView() { return <div className="loading-view"><div className="skeleton skeleton-title"/><div className="skeleton-row">{[1,2,3,4].map(i=><div className="skeleton skeleton-card" key={i}/>)}</div><div className="skeleton skeleton-table"/></div>; }
+function LoadError({ retry }: { retry: () => void }) { return <div className="error-state"><CircleAlert size={24}/><h2>Workspace data did not load</h2><p>Check the connection, then try again. No changes have been made.</p><div className="error-actions"><Button kind="primary" onClick={retry}>Try again</Button><Link href="/sign-in" className="text-link">Sign in to workspace</Link></div></div>; }
+function AccessDenied() { return <div className="error-state"><ShieldCheck size={24}/><h2>This area is outside your role</h2><p>Your workspace role does not include access to this operations area.</p><Link href="/" className="text-link">Return to overview <ArrowRight size={14}/></Link></div>; }
+function PageIntro({ eyebrow, title, description, actions }: { eyebrow: string; title: string; description: string; actions?: ReactNode }) {
+  return <div className="page-intro"><div><div className="eyebrow">{eyebrow}</div><h1 className="display">{title}</h1><p>{description}</p></div>{actions && <div className="intro-actions">{actions}</div>}</div>;
+}
+
+function Overview({ state }: { state: WorkspaceState }) {
+  const b2c = state.b2c as AnyObj; const ds = state.dispatch as AnyObj; const hr = state.hr as AnyObj;
+  const batches = arr(b2c.batches); const tx = batches.flatMap(b => arr(b.transactions)); const invoices = arr(ds.invoices);
+  const employees = arr(hr.employees); const exceptions = arr(hr.attendanceExceptions);
+  const todayKey = new Date().toISOString().slice(0,10);
+  const todayTx = tx.filter(t=>String(t.date||'').slice(0,10)===todayKey);
+  const cash = todayTx.reduce((n,t)=>n+Number(t.cashAmount||0),0); const sales = todayTx.filter(t=>t.type !== 'Return').reduce((n,t)=>n+Number(t.totalInvoiceAmount||0),0);
+  const paymentMix = [{name:'Cash',amount:cash,color:'mix-cash'},{name:'UPI',amount:todayTx.reduce((n,t)=>n+Number(t.upiAmount||0),0),color:'mix-upi'},{name:'Card',amount:todayTx.reduce((n,t)=>n+Number(t.cardAmount||0),0),color:'mix-card'}];
+  const mixTotal = paymentMix.reduce((s,item)=>s+item.amount,0);
+  const unmatched = todayTx.filter(t => !t.bankVerified && ['UPI','CARD','SPLIT'].includes(t.paymentMode)).length;
+  const pendingDispatch = invoices.filter(i => i.status !== 'Completed').length;
+  const pendingPeople = exceptions.length;
+  return <div className="page-stack">
+    <PageIntro eyebrow={`${new Date().toLocaleDateString('en-IN',{weekday:'long',day:'2-digit',month:'long',year:'numeric'}).toUpperCase()} · DAY CLOSE`} title="Good morning, team." description="Your operations room is ready. Here’s where today stands across sales, dispatch and people." actions={<><StatusPill tone="good">Workspace healthy</StatusPill><Button kind="secondary" onClick={() => window.print()}><FileDown size={15}/> Day-end summary</Button></>}/>
+    <div className="metric-grid">
+      <Metric label="B2C sales today" value={money(sales)} note={`${todayTx.length} invoices · Vastra channel`} icon={ArrowUpRight} color="teal"/>
+      <Metric label="Cash to reconcile" value={money(cash)} note="Denominations pending close" icon={Banknote} color="gold"/>
+      <Metric label="B2B dispatches" value={`${invoices.length - pendingDispatch} / ${invoices.length}`} note={`${pendingDispatch} need attention`} icon={PackageCheck} color="blue"/>
+      <Metric label="People exceptions" value={`${pendingPeople}`} note={`${employees.length} active employees`} icon={Users} color="rose"/>
+    </div>
+    <div className="overview-grid">
+      <Panel className="activity-panel"><PanelHeading kicker="TODAY AT A GLANCE" title="Close-out pulse" action={<span className="mono faint">{new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short'}).toUpperCase()}</span>}/>
+        <div className="pulse-total"><div><span>Recorded invoice value</span><strong className="mono">{money(sales)}</strong></div><div className="pulse-mark"><Activity size={19}/></div></div>
+        <div className="mix-heading"><span>COLLECTION BY PAYMENT MODE</span><span>FROM INVOICE ALLOCATION</span></div><div className="payment-mix">{paymentMix.map(item=><div className="mix-row" key={item.name}><div className="mix-label"><span><i className={item.color}/>{item.name}</span><strong className="mono">{money(item.amount)}</strong></div><div className="mix-track"><i className={item.color} style={{width:`${mixTotal?Math.max(2,item.amount/mixTotal*100):0}%`}}/></div></div>)}</div><div className="chart-legend"><span><i/> TODAY'S ALLOCATIONS</span><span>Based on invoice payment records</span></div>
+      </Panel>
+      <Panel className="close-panel"><PanelHeading kicker="THE NEXT RIGHT THING" title="Needs your attention"/>
+        <div className="attention-list">
+          <Link href="/reconciliation" className="attention-item"><span className="attention-icon coral"><FileSpreadsheet size={17}/></span><span className="attention-copy"><strong>Bank matches to review</strong><small>{unmatched} invoices awaiting a bank match</small></span><span className={`attention-count ${unmatched ? 'count-warn' : ''}`}>{unmatched}</span><ArrowRight size={16}/></Link>
+          <Link href="/dispatch" className="attention-item"><span className="attention-icon amber"><PackageCheck size={17}/></span><span className="attention-copy"><strong>B2B dispatch checklist</strong><small>{pendingDispatch} invoices still in progress</small></span><span className={`attention-count ${pendingDispatch ? 'count-warn' : ''}`}>{pendingDispatch}</span><ArrowRight size={16}/></Link>
+          <Link href="/people" className="attention-item"><span className="attention-icon lavender"><Clock3 size={17}/></span><span className="attention-copy"><strong>Attendance exceptions</strong><small>Review employee notes for this period</small></span><span className="attention-count">{pendingPeople}</span><ArrowRight size={16}/></Link>
+        </div>
+        <div className="assurance"><ShieldCheck size={16}/><span>Changes are saved to the workspace as you go.</span></div>
+      </Panel>
+    </div>
+    <Panel><PanelHeading kicker="RECENT WORK" title="Latest B2C invoices" action={<Link href="/reconciliation" className="text-link">Open reconciliation <ArrowRight size={14}/></Link>}/>
+      {tx.length ? <div className="table-wrap"><table><thead><tr><th>INVOICE</th><th>DATE</th><th>PAYMENT</th><th>BANK MATCH</th><th className="align-right">VALUE</th></tr></thead><tbody>{tx.slice(0,5).map((t,i)=><tr key={t.invoiceNumber ?? i}><td className="strong">{t.invoiceNumber || 'Invoice record'}</td><td>{shortDate(t.date)}</td><td><span className="method-chip">{t.paymentMode || '—'}</span></td><td><StatusPill tone={t.bankVerified ? 'good' : 'warn'}>{t.bankVerified ? 'Matched' : 'Review'}</StatusPill></td><td className="align-right mono">{money(t.totalInvoiceAmount)}</td></tr>)}</tbody></table></div> : <TableEmpty text="Imported sales will appear here once today’s Vastra batch is added."/>}
+    </Panel>
+  </div>;
+}
+
+function Reconciliation({ state, canEdit, save }: { state: AnyObj; canEdit: boolean; save: (data: AnyObj)=>void }) {
+  const [selected, setSelected] = useState(0); const [tab, setTab] = useState('Transactions');
+  const batches = arr(state.batches); const active = batches[selected] || { date: new Date().toISOString(), status: 'Open', transactions: [], bankRows: [], denominations: {} };
+  const tx = arr(active.transactions); const bankRows = arr(active.bankRows);
+  const update = (next: AnyObj) => save({ ...state, batches: batches.map((b,i)=>i===selected ? next : b) });
+  const addBatch = () => { const next = { date: new Date().toISOString(), status: 'Open', transactions: [], bankRows: [], denominations: { '500':0,'200':0,'100':0,'50':0,'20':0,'10':0,'5':0,'2':0,'1':0 } }; save({ ...state, batches: [...batches,next] }); setSelected(batches.length); };
+  const importFile = () => document.getElementById('sales-import')?.click();
+  const handleImport = (file?: File) => {
+    if (!file) return;
+    const reader = new FileReader(); reader.onload = () => { const rows = String(reader.result || '').trim().split(/\r?\n/).slice(1).map((line,idx)=>{ const c=line.split(',').map(x=>x.replace(/^"|"$/g,'')); return { invoiceNumber:c[0] || `IMPORT-${idx+1}`, date:c[1] || new Date().toISOString(), totalInvoiceAmount:Number(c[2]) || 0, type:c[3] === 'Return' ? 'Return' : 'Invoice', paymentMode:c[4] || 'CASH', cashAmount:Number(c[5])||0, upiAmount:Number(c[6])||0, cardAmount:Number(c[7])||0, bankVerified:false }; }); update({ ...active, transactions:[...tx,...rows] }); }; reader.readAsText(file);
+  };
+  const importBankFile = () => document.getElementById('bank-import')?.click();
+  const handleBankImport = (file?:File) => {
+    if(!file)return;
+    const reader=new FileReader();reader.onload=()=>{const rows=String(reader.result||'').trim().split(/\r?\n/).slice(1).map(line=>{const c=line.split(',').map(x=>x.replace(/^"|"$/g,''));return{date:c[0]||new Date().toISOString(),narration:c[1]||'',reference:c[2]||'',depositAmount:Number(c[3])||0,mode:c[4]||'UPI',matchedInvoiceNumber:''};});update({...active,bankRows:[...bankRows,...rows]});};reader.readAsText(file);
+  };
+  const setDenom=(key:string,value:number)=>update({...active,denominations:{...active.denominations,[key]:value}});
+  const total = tx.reduce((s,t)=>s+Number(t.totalInvoiceAmount||0),0);
+  const expectedCash = tx.reduce((s,t)=>s+Number(t.cashAmount||0),0);
+  const denomTotal = Object.entries(active.denominations || {}).reduce((s,[k,v])=>s+Number(k)*Number(v||0),0);
+  const exportTally = () => {
+    const rows = [['Invoice number','Date','Type','Payment mode','Cash','UPI','Card','Total'], ...tx.map(t=>[t.invoiceNumber,t.date,t.type,t.paymentMode,t.cashAmount,t.upiAmount,t.cardAmount,t.totalInvoiceAmount])];
+    const csv = rows.map(row=>row.map(value=>`"${String(value ?? '').replaceAll('"','""')}"`).join(',')).join('\r\n');
+    const url = URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+    const anchor=document.createElement('a');anchor.href=url;anchor.download=`vastra-tally-${String(active.date||'batch').slice(0,10)}.csv`;anchor.click();URL.revokeObjectURL(url);
+  };
+  const pending = tx.filter(t=>!t.bankVerified && ['UPI','CARD','SPLIT'].includes(t.paymentMode));
+  const matchInvoice = (invoiceNumber:string, rowIndex:number) => { const index = tx.findIndex(t=>t.invoiceNumber===invoiceNumber); if(index<0)return; const next=[...tx]; next[index]={...next[index],bankVerified:true}; const rows=[...bankRows]; rows[rowIndex]={...rows[rowIndex],matchedInvoiceNumber:invoiceNumber}; update({...active,transactions:next,bankRows:rows}); };
+  return <div className="page-stack">
+    <PageIntro eyebrow="VASTRA B2C · SALES CONTROL" title="Reconciliation" description="Bring invoice sales and bank deposits into one trusted close." actions={<><input id="sales-import" type="file" accept=".csv,.txt" hidden onChange={e=>handleImport(e.target.files?.[0])}/><Button onClick={importFile} disabled={!canEdit}><FileSpreadsheet size={15}/> Import Vastra CSV</Button><Button kind="primary" onClick={exportTally}><FileDown size={15}/> Export for Tally</Button></>}/>
+    <div className="recon-toolbar"><div className="batch-switch"><label>ACTIVE BATCH</label><select value={String(selected)} onChange={e=>setSelected(Number(e.target.value))} data-testid="select-active-batch">{batches.length ? batches.map((b,i)=><option key={i} value={i}>{shortDate(b.date)} · {b.status || 'Open'}</option>) : <option value="0">No batches yet</option>}</select></div><span className="toolbar-divider"/><div className="batch-meta"><span className="green-dot"/><span>{batches.length ? `${tx.length} transactions loaded` : 'Ready for first import'}</span><span className="meta-sep">·</span><span className="mono">BATCH {String(selected+1).padStart(2,'0')}</span></div><Button kind="quiet" onClick={addBatch} disabled={!canEdit}>+ New batch</Button></div>
+    <div className="metric-grid compact-grid"><Metric label="Invoice value" value={money(total)} note={`${tx.length} sales and returns`} icon={FileText}/><Metric label="Cash expected" value={money(expectedCash)} note="From payment allocations" icon={Banknote} color="gold"/><Metric label="Cash counted" value={money(denomTotal)} note={denomTotal===expectedCash?'Denominations balance':'Denominations need review'} icon={ClipboardCheck} color={denomTotal===expectedCash?'teal':'rose'}/><Metric label="Bank exceptions" value={`${pending.length}`} note="Card, UPI and split payments" icon={CircleAlert} color="rose"/></div>
+    <Panel className="recon-panel"><div className="tabs">{['Transactions','Bank matching','Denominations'].map(t=><button key={t} onClick={()=>setTab(t)} className={`tab ${tab===t?'tab-active':''}`} data-testid={`tab-${t.toLowerCase().replace(' ','-')}`}>{t}{t==='Bank matching'&&<span className="tab-count">{pending.length}</span>}</button>)}</div>
+      {tab==='Transactions' && <><div className="panel-tools"><span className="tool-note"><FileSpreadsheet size={16}/> Vastra invoice register</span><span className="tool-hint">Split payment allocation is captured per invoice.</span></div>{tx.length ? <div className="table-wrap"><table><thead><tr><th>INVOICE</th><th>DATE</th><th>TYPE</th><th>PAYMENT MODE</th><th>CASH</th><th>UPI</th><th>CARD</th><th className="align-right">INVOICE TOTAL</th></tr></thead><tbody>{tx.map((t,i)=><tr key={t.invoiceNumber ?? i}><td className="strong mono">{t.invoiceNumber || '—'}</td><td>{shortDate(t.date)}</td><td><StatusPill tone={t.type==='Return'?'bad':'neutral'}>{t.type || 'Invoice'}</StatusPill></td><td><select className="inline-select" value={t.paymentMode || 'CASH'} disabled={!canEdit} onChange={e=>{const n=[...tx];n[i]={...t,paymentMode:e.target.value};update({...active,transactions:n});}}>{['CASH','CARD','UPI','SPLIT','RETURN'].map(v=><option key={v}>{v}</option>)}</select></td>{['cashAmount','upiAmount','cardAmount'].map(k=><td key={k}><input className="cell-input mono" aria-label={`${k} ${t.invoiceNumber}`} disabled={!canEdit} type="number" value={t[k] ?? 0} onChange={e=>{const n=[...tx];n[i]={...t,[k]:Number(e.target.value)};update({...active,transactions:n});}}/></td>)}<td className="align-right mono strong">{money(t.totalInvoiceAmount)}</td></tr>)}</tbody></table></div> : <TableEmpty text="Import the Vastra B2C CSV to start matching invoices and payments."/>}</>}
+      {tab==='Bank matching' && <><div className="panel-tools"><span className="tool-note"><Banknote size={16}/> Deposits and invoice references</span><span className="tool-hint">Choose the invoice that corresponds to each bank row.</span><input id="bank-import" type="file" accept=".csv,.txt" hidden onChange={e=>handleBankImport(e.target.files?.[0])}/><Button onClick={importBankFile} disabled={!canEdit}><FileSpreadsheet size={14}/> Import bank CSV</Button></div>{bankRows.length ? <div className="table-wrap"><table><thead><tr><th>DEPOSIT DATE</th><th>NARRATION / REFERENCE</th><th>MODE</th><th>DEPOSIT</th><th>MATCH TO INVOICE</th></tr></thead><tbody>{bankRows.map((r,i)=><tr key={i}><td>{shortDate(r.date)}</td><td><strong>{r.narration || 'Bank deposit'}</strong><small className="sub-cell">{r.reference || 'No reference'}</small></td><td><span className="method-chip">{r.mode || '—'}</span></td><td className="mono">{money(r.depositAmount)}</td><td><select className="inline-select" value={r.matchedInvoiceNumber || ''} disabled={!canEdit} onChange={e=>{if(e.target.value)matchInvoice(e.target.value,i);else {const rows=[...bankRows];rows[i]={...r,matchedInvoiceNumber:''};update({...active,bankRows:rows});}}}><option value="">Select invoice</option>{tx.map(t=><option key={t.invoiceNumber} value={t.invoiceNumber}>{t.invoiceNumber}</option>)}</select></td></tr>)}</tbody></table></div>:<TableEmpty text="Add bank statement rows to review deposits against invoice payment allocations."/>}</>}
+      {tab==='Denominations' && <div className="denom-layout"><div><div className="tool-note"><Banknote size={16}/> Cash drawer count</div><p className="tool-hint denom-hint">Enter the number of notes and coins counted at close.</p><div className="denom-grid">{['500','200','100','50','20','10','5','2','1'].map(note=><label className="denom-row" key={note}><span className="note-chip">₹{note}</span><span className="mono">×</span><input type="number" min="0" value={active.denominations?.[note] ?? 0} disabled={!canEdit} aria-label={`${note} rupee notes`} onChange={e=>setDenom(note,Number(e.target.value))}/><span className="mono denom-subtotal">{money(Number(note)*Number(active.denominations?.[note]||0))}</span></label>)}</div></div><div className="denom-summary"><div className="eyebrow">CASH CLOSE</div><strong className="mono">{money(denomTotal)}</strong><span>Physical count</span><div className="summary-line"/><span>Expected from sales</span><b className="mono">{money(expectedCash)}</b><StatusPill tone={denomTotal===expectedCash?'good':'warn'}>{denomTotal===expectedCash?'Balanced':`${money(denomTotal-expectedCash)} variance`}</StatusPill><Button kind="primary" disabled={!canEdit} onClick={()=>update({...active, status:'Closed'})}><CheckCircle2 size={15}/> Confirm cash close</Button></div></div>}
+    </Panel>
+    <div className="recon-footnote"><ShieldCheck size={16}/><span>Every adjustment is recorded in the workspace. Tally export uses the active batch only.</span><StatusPill tone="gold">{canEdit?'Editing enabled':'Read only'}</StatusPill></div>
+  </div>;
+}
+
+function Dispatch({ state, canEdit, save }: { state: AnyObj; canEdit: boolean; save:(data:AnyObj)=>void }) {
+  const [filter,setFilter]=useState('All'); const [search,setSearch]=useState('');
+  const invoices=arr(state.invoices);
+  const update=(i:number,patch:AnyObj)=>{const next=[...invoices];const item={...next[i],...patch}; const complete=Boolean(item.eInvoiceDone&&item.eWayDone&&item.bundleDone&&item.lrNumber&&item.whatsappSent&&item.courierSent&&item.vastraCourierUpdated);item.status=complete?'Completed':'Pending';next[i]=item;save({...state,invoices:next});};
+  const visible=invoices.map((v,i)=>({...v,_idx:i})).filter(v=>(filter==='All'||v.status===filter)&&`${v.invoiceNumber} ${v.customerName}`.toLowerCase().includes(search.toLowerCase()));
+  const printLabels=()=>window.print();
+  return <div className="page-stack">
+    <PageIntro eyebrow="B2B · DISPATCH DESK" title="Dispatch, without the loose ends." description="Make each compliance step visible before a bundle leaves the floor." actions={<Button kind="primary" onClick={printLabels}><Printer size={15}/> Print labels</Button>}/>
+    <div className="dispatch-banner"><div className="banner-icon"><PackageCheck size={19}/></div><div><strong>Compliance before courier handoff</strong><p>Complete e-invoice, e-way bill, bundle and carrier details on every B2B invoice.</p></div><span className="banner-count">{invoices.filter(i=>i.status==='Completed').length}<small>DONE</small></span></div>
+    <div className="dispatch-summary"><Metric label="Invoices in queue" value={String(invoices.length)} note="B2B orders awaiting handoff" icon={FileText}/><Metric label="Ready to dispatch" value={String(invoices.filter(i=>i.status==='Completed').length)} note="All checklist items complete" icon={CheckCircle2} color="teal"/><Metric label="In progress" value={String(invoices.filter(i=>i.status!=='Completed').length)} note="Compliance steps remaining" icon={Clock3} color="gold"/></div>
+    <Panel><div className="panel-heading dispatch-heading"><div><div className="eyebrow">ORDER COMPLIANCE</div><h2>Dispatch checklist</h2></div><div className="dispatch-filters"><div className="search-box"><Search size={15}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search invoice or customer" data-testid="input-search-dispatch"/></div><select value={filter} onChange={e=>setFilter(e.target.value)} data-testid="select-dispatch-status"><option>All</option><option>Pending</option><option>Completed</option></select></div></div>
+      {visible.length ? <div className="dispatch-list">{visible.map((invoice)=>{const steps=[['eInvoiceDone','E-invoice'],['eWayDone','E-way bill'],['bundleDone','Bundle'],['lrNumber','LR number'],['whatsappSent','WhatsApp'],['courierSent','Courier'],['vastraCourierUpdated','Vastra updated']] as const;return <article className="dispatch-card" key={invoice.invoiceNumber || invoice._idx}><div className="dispatch-card-top"><div><span className="mono invoice-ref">{invoice.invoiceNumber || 'B2B INVOICE'}</span><strong>{invoice.customerName || 'Customer details pending'}</strong><small>{shortDate(invoice.date)} · {invoice.shipToDetails || invoice.billToDetails || 'Address not recorded'}</small></div><StatusPill tone={invoice.status==='Completed'?'good':'warn'}>{invoice.status || 'Pending'}</StatusPill></div><div className="checklist">{steps.map(([key,label])=>{const done=key==='lrNumber'?Boolean(invoice.lrNumber):Boolean(invoice[key]);return <button key={key} className={`check-step ${done?'checked':''}`} disabled={!canEdit} onClick={()=>update(invoice._idx,key==='lrNumber'?{lrNumber:invoice.lrNumber || 'LR pending'}:{[key]:!invoice[key]})} data-testid={`button-dispatch-${key}-${invoice._idx}`}><span className="check-box">{done&&<Check size={12}/>}</span><span>{label}</span></button>;})}</div><div className="dispatch-fields"><label>LR / tracking no.<input value={invoice.lrNumber || ''} disabled={!canEdit} placeholder="Enter carrier LR number" onChange={e=>update(invoice._idx,{lrNumber:e.target.value})}/></label><label>WhatsApp recipient<input value={invoice.whatsappRecipient || ''} disabled={!canEdit} placeholder="Customer phone number" onChange={e=>update(invoice._idx,{whatsappRecipient:e.target.value})}/></label><label>E-way bill no.<input value={invoice.eWayBillNumber || ''} disabled={!canEdit} placeholder="Bill reference" onChange={e=>update(invoice._idx,{eWayBillNumber:e.target.value})}/></label></div><div className="document-row"><DocumentUpload label={invoice.lrPdfObjectPath?'LR PDF attached':'Attach LR PDF'} disabled={!canEdit} onUploaded={path=>update(invoice._idx,{lrPdfObjectPath:path})}/><DocumentUpload label={invoice.courierPdfObjectPath?'Courier PDF attached':'Attach courier PDF'} disabled={!canEdit} onUploaded={path=>update(invoice._idx,{courierPdfObjectPath:path})}/></div></article>;})}</div>:<TableEmpty text="No dispatch invoices match this view. Add dispatch data to the workspace to begin."/>}</Panel>
+    {!canEdit&&<div className="recon-footnote"><ShieldCheck size={15}/> Read-only access. Ask an Admin to update dispatch compliance.</div>}
+  </div>;
+}
+
+function People({ state, canEdit, canLog, save, saveAttendance }: { state:AnyObj;canEdit:boolean;canLog:boolean;save:(data:AnyObj)=>void;saveAttendance:(data:AnyObj)=>void }) {
+  const [section,setSection]=useState('Attendance'); const [showForm,setShowForm]=useState(false);
+  const [employeeForm,setEmployeeForm]=useState(false); const [employeeName,setEmployeeName]=useState(''); const [employeePhone,setEmployeePhone]=useState(''); const [employeeSalary,setEmployeeSalary]=useState('');
+  const [swapFrom,setSwapFrom]=useState<string|null>(null);
+  const employees=arr(state.employees); const exceptions=arr(state.attendanceExceptions); const rosters=arr(state.sundayRosters);
+  const [emp,setEmp]=useState('');const [date,setDate]=useState(new Date().toISOString().slice(0,10));const [kind,setKind]=useState('Absent');
+  const submitException=()=>{if(!emp)return; saveAttendance({...state,attendanceExceptions:[...exceptions,{employeeId:emp,date,exceptionType:kind}]});setShowForm(false);};
+  const updateRoster=(id:string,field:string,value:string)=>save({...state,sundayRosters:rosters.map(r=>r.employeeId===id?{...r,[field]:value}:r)});
+  const createEmployee=()=>{if(!employeeName.trim())return;const employee={id:`AT-${Date.now()}`,name:employeeName.trim(),contactNumber:employeePhone,status:'Active',baseSalary:Number(employeeSalary)||0,esiAmount:0,pfAmount:0,transportAllowance:0,accumulatedPto:0,weekendPenaltyCount:0};save({...state,employees:[...employees,employee]});setEmployeeForm(false);setEmployeeName('');setEmployeePhone('');setEmployeeSalary('');};
+  const handleSwap=(employeeId:string)=>{if(!swapFrom){setSwapFrom(employeeId);return;}if(swapFrom===employeeId){setSwapFrom(null);return;}const first=rosters.find(r=>r.employeeId===swapFrom);const second=rosters.find(r=>r.employeeId===employeeId);if(first&&second)save({...state,sundayRosters:rosters.map(r=>r.employeeId===swapFrom?{...r,shiftType:second.shiftType,status:'Swap requested'}:r.employeeId===employeeId?{...r,shiftType:first.shiftType,status:'Swap requested'}:r)});setSwapFrom(null);};
+  return <div className="page-stack">
+    <PageIntro eyebrow="PEOPLE OPERATIONS" title="People, accounted for." description="Keep attendance exceptions and Sunday coverage clear before payroll is run." actions={<>{canLog&&<Button kind="primary" onClick={()=>setShowForm(v=>!v)}><Clock3 size={15}/> Log exception</Button>}</>}/>
+    <div className="metric-grid compact-grid"><Metric label="Active employees" value={String(employees.filter(e=>e.status!=='Inactive').length)} note="Current employee records" icon={Users}/><Metric label="Attendance exceptions" value={String(exceptions.length)} note="Recorded for this cycle" icon={CircleAlert} color="gold"/><Metric label="Sunday roster" value={String(rosters.length)} note="Shift assignments on file" icon={ClipboardCheck} color="blue"/><Metric label="Payroll basis" value="Monthly" note="Salary and advances in Payroll" icon={Wallet} color="rose"/></div>
+    {showForm&&<Panel className="exception-form"><PanelHeading kicker="NEW ATTENDANCE RECORD" title="Log an exception" action={<button className="icon-button" onClick={()=>setShowForm(false)} aria-label="Close form"><X size={17}/></button>}/><div className="form-row"><label>Employee<select value={emp} onChange={e=>setEmp(e.target.value)}><option value="">Choose employee</option>{employees.map(e=><option value={e.id} key={e.id}>{e.name}</option>)}</select></label><label>Date<input type="date" value={date} onChange={e=>setDate(e.target.value)}/></label><label>Exception type<select value={kind} onChange={e=>setKind(e.target.value)}>{['Absent','Late','Early leave','Other'].map(x=><option key={x}>{x}</option>)}</select></label><Button kind="primary" onClick={submitException} disabled={!emp}>Save exception</Button></div></Panel>}
+    <Panel><div className="tabs">{['Attendance','Employees','Sunday roster'].map(x=><button onClick={()=>setSection(x)} className={`tab ${section===x?'tab-active':''}`} key={x}>{x}</button>)}</div>
+      {section==='Attendance'&&<><PanelHeading kicker="ATTENDANCE REVIEW" title="Exceptions this cycle"/>{exceptions.length?<div className="table-wrap"><table><thead><tr><th>EMPLOYEE</th><th>DATE</th><th>EXCEPTION</th><th>PAYROLL EFFECT</th></tr></thead><tbody>{exceptions.map((e,i)=><tr key={i}><td className="strong">{employees.find(v=>v.id===e.employeeId)?.name||e.employeeName||e.employeeId}</td><td>{shortDate(e.date)}</td><td><StatusPill tone={e.exceptionType==='Absent'?'warn':'neutral'}>{e.exceptionType}</StatusPill></td><td className="faint">{e.exceptionType==='Absent'?'Review weekend penalty':'No automatic change'}</td></tr>)}</tbody></table></div>:<TableEmpty text="No attendance exceptions have been logged for this cycle."/>}</>}
+      {section==='Employees'&&<><PanelHeading kicker="EMPLOYEE REGISTER" title="Team records" action={canEdit&&<Button onClick={()=>setEmployeeForm(v=>!v)}><Users size={14}/> Add employee</Button>}/>{employeeForm&&<div className="form-row employee-form"><label>Employee name<input value={employeeName} onChange={e=>setEmployeeName(e.target.value)} placeholder="Full name"/></label><label>Contact number<input value={employeePhone} onChange={e=>setEmployeePhone(e.target.value)} placeholder="Mobile number"/></label><label>Base monthly salary (₹)<input type="number" value={employeeSalary} onChange={e=>setEmployeeSalary(e.target.value)} placeholder="Salary"/></label><Button kind="primary" onClick={createEmployee} disabled={!employeeName.trim()}>Save employee</Button></div>}{employees.length?<div className="table-wrap"><table><thead><tr><th>EMPLOYEE</th><th>CONTACT</th><th>STATUS</th><th>BASE SALARY</th><th>ESI / PF</th><th>ACCRUED PTO</th></tr></thead><tbody>{employees.map((e,i)=><tr key={e.id||i}><td className="strong">{e.name||'Employee'}<small className="sub-cell mono">{e.id}</small></td><td>{e.contactNumber||'—'}</td><td><StatusPill tone={e.status==='Active'?'good':'neutral'}>{e.status||'Active'}</StatusPill></td><td className="mono">{money(e.baseSalary)}</td><td className="mono">{money(Number(e.esiAmount||0)+Number(e.pfAmount||0))}</td><td>{Number(e.accumulatedPto||0)} days</td></tr>)}</tbody></table></div>:<TableEmpty text="Employee records will appear here when available in the workspace."/>}</>}
+      {section==='Sunday roster'&&<><PanelHeading kicker="WEEKEND COVERAGE" title="Sunday roster" action={<label className="diwali-switch"><input type="checkbox" disabled={!canEdit} checked={Boolean(state.diwaliFullDay)} onChange={e=>save({...state,diwaliFullDay:e.target.checked})}/><span>Diwali full-day roster</span></label>}/>{rosters.length?<><div className="swap-note">Select “Swap shift” on one employee, then on another to request a roster exchange.</div><div className="table-wrap"><table><thead><tr><th>EMPLOYEE</th><th>ROSTER DATE</th><th>SHIFT</th><th>STATUS</th><th>SWAP</th></tr></thead><tbody>{rosters.map((r,i)=><tr key={i}><td className="strong">{employees.find(e=>e.id===r.employeeId)?.name||r.employeeId}</td><td>{shortDate(r.date)}</td><td><select className="inline-select" disabled={!canEdit} value={r.shiftType||'Off'} onChange={e=>updateRoster(r.employeeId,'shiftType',e.target.value)}>{['Half-Day','Full-Day','Off'].map(v=><option key={v}>{v}</option>)}</select></td><td><StatusPill tone={r.status==='Confirmed'?'good':'warn'}>{r.status||'Draft'}</StatusPill></td><td><button className="swap-button" disabled={!canEdit} onClick={()=>handleSwap(r.employeeId)}>{swapFrom===r.employeeId?'Cancel swap':'Swap shift'}</button></td></tr>)}</tbody></table></div></>:<TableEmpty text="Sunday coverage assignments will appear here once the roster is set."/>}</>}
+    </Panel>
+    {!canEdit&&<div className="recon-footnote"><ShieldCheck size={15}/> Accounts access can record attendance exceptions; employee and roster records are read-only.</div>}
+  </div>;
+}
+
+function Payroll({ state, canEdit, save }: {state:AnyObj;canEdit:boolean;save:(data:AnyObj)=>void}) {
+  const [filter,setFilter]=useState('All');
+  const [form,setForm]=useState<'note'|'salary'|null>(null);
+  const [employeeId,setEmployeeId]=useState('');
+  const [amount,setAmount]=useState('');
+  const [repayment,setRepayment]=useState('');
+  const [issueDate,setIssueDate]=useState(new Date().toISOString().slice(0,10));
+  const employees=arr(state.employees);const notes=arr(state.noteAdvances);const advances=arr(state.salaryAdvances);
+  const submitAdvance=()=>{
+    if(!employeeId||Number(amount)<=0)return;
+    const id=String(Date.now());
+    if(form==='note')save({...state,noteAdvances:[...notes,{id,employeeId,totalAmount:Number(amount),remainingBalance:Number(amount),monthlyRepayment:Number(repayment)||0,issueDate,expectedCompletionDate:'',status:'Active'}]});
+    if(form==='salary')save({...state,salaryAdvances:[...advances,{id,employeeId,amountIssued:Number(amount),issueDate}]});
+    setForm(null);setAmount('');setRepayment('');
+  };
+  const totalSalary=employees.reduce((s,e)=>s+Number(e.baseSalary||0)+Number(e.transportAllowance||0)-Number(e.esiAmount||0)-Number(e.pfAmount||0),0);
+  const remaining=notes.reduce((s,n)=>s+Number(n.remainingBalance||0),0);
+  const visible=notes.filter(n=>filter==='All'||n.status===filter);
+  return <div className="page-stack">
+    <PageIntro eyebrow="PEOPLE OPERATIONS · ACCOUNTS" title="Payroll with a clear trail." description="Review salary basis and employee advances together before the month is closed." actions={<><Button onClick={()=>window.print()}><FileDown size={15}/> Print payroll view</Button>{canEdit&&<><Button onClick={()=>{setForm('note');setEmployeeId('');}}><Banknote size={14}/> Note advance</Button><Button kind="primary" onClick={()=>{setForm('salary');setEmployeeId('');}}><ArrowUpRight size={14}/> Salary advance</Button></>}</>}/>
+    {form&&<Panel className="exception-form"><PanelHeading kicker={form==='note'?'RECOVERABLE EMPLOYEE ADVANCE':'ONE-TIME PAYROLL ADVANCE'} title={form==='note'?'Issue a note advance':'Record a salary advance'} action={<button className="icon-button" onClick={()=>setForm(null)} aria-label="Close form"><X size={17}/></button>}/><div className="form-row"><label>Employee<select value={employeeId} onChange={e=>setEmployeeId(e.target.value)}><option value="">Choose employee</option>{employees.map(e=><option value={e.id} key={e.id}>{e.name}</option>)}</select></label><label>Amount (₹)<input type="number" min="1" value={amount} onChange={e=>setAmount(e.target.value)} placeholder="Enter amount"/></label>{form==='note'&&<label>Monthly repayment (₹)<input type="number" min="0" value={repayment} onChange={e=>setRepayment(e.target.value)} placeholder="Monthly deduction"/></label>}<label>Issue date<input type="date" value={issueDate} onChange={e=>setIssueDate(e.target.value)}/></label><Button kind="primary" onClick={submitAdvance} disabled={!employeeId||Number(amount)<=0}>Save advance</Button></div></Panel>}
+    <div className="metric-grid compact-grid"><Metric label="Monthly salary basis" value={money(totalSalary)} note="Salary + transport − ESI / PF" icon={Wallet}/><Metric label="Note advance balance" value={money(remaining)} note={`${notes.length} active and completed records`} icon={Banknote} color="gold"/><Metric label="Salary advances issued" value={money(advances.reduce((s,a)=>s+Number(a.amountIssued||0),0))} note={`${advances.length} recorded this cycle`} icon={ArrowUpRight} color="blue"/><Metric label="Payroll headcount" value={String(employees.length)} note="Employee records on file" icon={Users} color="rose"/></div>
+    <div className="payroll-grid"><Panel><PanelHeading kicker="MONTHLY SALARY" title="Salary register" action={<span className="mono faint">INR · MONTHLY</span>}/>{employees.length?<div className="table-wrap"><table><thead><tr><th>EMPLOYEE</th><th>BASE</th><th>TRANSPORT</th><th>ESI</th><th>PF</th><th className="align-right">EST. NET</th></tr></thead><tbody>{employees.map((e,i)=><tr key={e.id||i}><td className="strong">{e.name||'Employee'}<small className="sub-cell">{e.weekendPenaltyCount||0} weekend penalties</small></td><td className="mono">{money(e.baseSalary)}</td><td className="mono">{money(e.transportAllowance)}</td><td className="mono">{money(e.esiAmount)}</td><td className="mono">{money(e.pfAmount)}</td><td className="mono align-right strong">{money(Number(e.baseSalary||0)+Number(e.transportAllowance||0)-Number(e.esiAmount||0)-Number(e.pfAmount||0))}</td></tr>)}</tbody></table></div>:<TableEmpty text="Salary information is not yet available."/>}</Panel>
+      <Panel><PanelHeading kicker="ADVANCES" title="Note advances" action={<select className="inline-select" value={filter} onChange={e=>setFilter(e.target.value)}><option>All</option><option>Active</option><option>Completed</option></select>}/>{visible.length?<div className="advance-list">{visible.map((n,i)=><div className="advance-row" key={n.id||i}><div className="advance-avatar">{(employees.find(e=>e.id===n.employeeId)?.name||'E').slice(0,1)}</div><div className="advance-detail"><strong>{employees.find(e=>e.id===n.employeeId)?.name||n.employeeName||'Employee'}</strong><small>Started {shortDate(n.issueDate)} · finishes {shortDate(n.expectedCompletionDate)}</small><div className="advance-progress"><i style={{width:`${Math.min(100,Math.max(0,100-(Number(n.remainingBalance||0)/Math.max(1,Number(n.totalAmount||1))*100)))}%`}}/></div><small>{money(n.monthlyRepayment)} monthly repayment</small></div><div className="advance-balance"><strong className="mono">{money(n.remainingBalance)}</strong><small>of {money(n.totalAmount)}</small><StatusPill tone={n.status==='Completed'?'good':'gold'}>{n.status||'Active'}</StatusPill></div></div>)}</div>:<TableEmpty text="No note advances match this view."/>}</Panel></div>
+    <Panel><PanelHeading kicker="ONE-TIME SUPPORT" title="Salary advances" action={<span className="tool-hint">Issued amount and date</span>}/>{advances.length?<div className="table-wrap"><table><thead><tr><th>EMPLOYEE</th><th>ISSUED</th><th>ISSUE DATE</th><th>RECORD</th></tr></thead><tbody>{advances.map((a,i)=><tr key={a.id||i}><td className="strong">{employees.find(e=>e.id===a.employeeId)?.name||a.employeeName||a.employeeId}</td><td className="mono">{money(a.amountIssued)}</td><td>{shortDate(a.issueDate)}</td><td><StatusPill tone="neutral">Salary advance</StatusPill></td></tr>)}</tbody></table></div>:<TableEmpty text="Salary advances issued this cycle will appear here."/>}</Panel>
+    {!canEdit&&<div className="recon-footnote"><ShieldCheck size={15}/> Accounts view is read-only. Payroll master data is managed by Admin.</div>}
+  </div>;
+}
+
+function Team({ role, users, loading, onRole }: {role:Role;users:WorkspaceUser[];loading:boolean;onRole:(id:string,role:Role)=>void}) {
+  return <div className="page-stack"><PageIntro eyebrow="ADMINISTRATION · ACCESS CONTROL" title="The right access, for each role." description="Keep workspace permissions aligned with the work each person owns."/>
+    <div className="role-intro"><div className="role-icon"><ShieldCheck size={20}/></div><div><strong>Role-based workspace access</strong><p>Admins manage access. Billing operates B2C reconciliation and B2B dispatch. Accounts records attendance and views payroll. Pending accounts have no operational access.</p></div></div>
+    <div className="role-cards">{[{role:'admin',label:'Admin',detail:'Full workspace access',count:'All modules'},{role:'billing',label:'Billing',detail:'B2C and dispatch operations',count:'2 modules'},{role:'accounts',label:'Accounts',detail:'Attendance input, HR and payroll view',count:'Read / log'},{role:'pending',label:'Pending',detail:'Waiting for role assignment',count:'No access'}].map((r,i)=><div className={`role-card rc-${i}`} key={r.role}><span className="role-index">0{i+1}</span><strong>{r.label}</strong><p>{r.detail}</p><small>{r.count}</small></div>)}</div>
+    <Panel><PanelHeading kicker="WORKSPACE MEMBERS" title="Team access" action={<StatusPill tone={role==='admin'?'good':'warn'}>{cleanName(role)} view</StatusPill>}/>{loading?<LoadingView/>:users.length?<div className="table-wrap"><table><thead><tr><th>MEMBER</th><th>EMAIL</th><th>JOINED</th><th>ACCESS ROLE</th></tr></thead><tbody>{users.map((u,i)=><tr key={u.userId}><td><span className="member-cell"><span className="avatar avatar-light">{(u.name||u.email||'U').slice(0,1).toUpperCase()}</span><strong>{u.name||'Workspace member'}</strong></span></td><td>{u.email}</td><td>{shortDate(u.createdAt)}</td><td><select className="inline-select role-select" disabled={role!=='admin'} value={u.role} onChange={e=>onRole(u.userId,e.target.value as Role)} data-testid={`select-role-${u.userId}`}>{['admin','billing','accounts','pending'].map(x=><option key={x} value={x}>{cleanName(x)}</option>)}</select></td></tr>)}</tbody></table></div>:<TableEmpty text="No workspace members are available."/>}
+      {role!=='admin'&&<div className="table-note"><ShieldCheck size={15}/> Only Admins can change member roles.</div>}
+    </Panel>
+  </div>;
+}
+
+function WorkspaceApp() {
+  const {query,me,b2c,dispatch,hr,attendance}=useWorkspace();
+  const roleMutation=useUpdateWorkspaceUserRole();
+  const usersQuery=useListWorkspaceUsers({query:{queryKey:getListWorkspaceUsersQueryKey(),enabled:me.data?.role==='admin'}});
+  const role=(me.data?.role || query.data?.user?.role || 'pending') as Role;
+  const name=me.data?.name || query.data?.user?.name || '';
+  const data=query.data;
+  const save=(mutation:typeof b2c, module:AnyObj)=>mutation.mutate({data:{expectedVersion:data?.version||0,data:module}});
+  const [loc]=useLocation();
+  if(query.isLoading)return <AppShell role={role} name={name}><LoadingView/></AppShell>;
+  if(query.isError||!data)return <AppShell role={role} name={name}><LoadError retry={()=>query.refetch()}/></AppShell>;
+  const canOperate=role==='admin'||role==='billing';
+  const canPeople=role==='admin'||role==='accounts';
+  return <AppShell role={role} name={name}><ErrorBoundary resetKey={loc}><Switch>
+    <Route path="/" component={()=><Overview state={data}/>}/>
+    <Route path="/reconciliation" component={()=><>{canOperate?<Reconciliation state={data.b2c as AnyObj} canEdit={canOperate} save={next=>save(b2c,next)}/>:<AccessDenied/>}</>}/>
+    <Route path="/dispatch" component={()=><>{canOperate?<Dispatch state={data.dispatch as AnyObj} canEdit={canOperate} save={next=>save(dispatch,next)}/>:<AccessDenied/>}</>}/>
+    <Route path="/people" component={()=><>{canPeople?<People state={data.hr as AnyObj} canEdit={role==='admin'} canLog={canPeople} save={next=>save(hr,next)} saveAttendance={next=>save(attendance,next)}/>:<AccessDenied/>}</>}/>
+    <Route path="/payroll" component={()=><>{canPeople?<Payroll state={data.hr as AnyObj} canEdit={role==='admin'} save={next=>save(hr,next)}/>:<AccessDenied/>}</>}/>
+    <Route path="/team" component={()=><>{role==='admin'?<Team role={role} users={(usersQuery.data||[]) as WorkspaceUser[]} loading={usersQuery.isLoading} onRole={(userId,nextRole)=>roleMutation.mutate({userId,data:{role:nextRole}},{onSuccess:()=>queryClient.invalidateQueries({queryKey:getListWorkspaceUsersQueryKey()})})}/>:<AccessDenied/>}</>}/>
+    <Route component={NotFound}/>
+  </Switch></ErrorBoundary></AppShell>;
+
+}
+function AuthRouter() {
+  const { isLoaded,isSignedIn }=useUser();
+  useGetWorkspaceMe({query:{queryKey:getGetWorkspaceMeQueryKey(),enabled:isLoaded&&isSignedIn}});
+  return <><ClerkCacheInvalidator/><Switch>
+    <Route path="/sign-in/*?" component={()=> <AuthPage mode="in"/>}/>
+    <Route path="/sign-up/*?" component={()=> <AuthPage mode="up"/>}/>
+    <Route path="/" component={()=><WorkspaceApp/>}/>
+    <Route path="/reconciliation" component={()=><WorkspaceApp/>}/>
+    <Route path="/dispatch" component={()=><WorkspaceApp/>}/>
+    <Route path="/people" component={()=><WorkspaceApp/>}/>
+    <Route path="/payroll" component={()=><WorkspaceApp/>}/>
+    <Route path="/team" component={()=><WorkspaceApp/>}/>
+    <Route component={NotFound}/>
+  </Switch></>;
+}
+function ClerkProviderWithRoutes() {
+  const [,setLocation]=useLocation();
+  return <ClerkProvider publishableKey={clerkPubKey} proxyUrl={clerkProxyUrl} appearance={clerkAppearance} signInUrl={`${basePath}/sign-in`} signUpUrl={`${basePath}/sign-up`} localization={{signIn:{start:{title:'Welcome back',subtitle:'Sign in to your operations workspace'}},signUp:{start:{title:'Join The Arun Tex',subtitle:'Create your workspace account'}}}} routerPush={to=>setLocation(stripBase(to))} routerReplace={to=>setLocation(stripBase(to),{replace:true})}>
+    <QueryClientProvider client={queryClient}><TooltipProvider><AuthRouter/><Toaster/></TooltipProvider></QueryClientProvider>
+  </ClerkProvider>;
+}
 function App() {
-  return (
-    <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
-          <Router />
-        </WouterRouter>
-        <Toaster />
-      </TooltipProvider>
-    </QueryClientProvider>
-  );
+  if(!clerkPubKey) return <div className="error-state"><Shirt size={24}/><h2>Workspace access is not configured</h2><p>Add the Clerk publishable key to enable secure workspace sign-in.</p></div>;
+  return <WouterRouter base={basePath}><ClerkProviderWithRoutes/></WouterRouter>;
 }
-
 export default App;
