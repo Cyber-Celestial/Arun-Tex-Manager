@@ -25,6 +25,7 @@ import {
 import { and, eq, sql } from "drizzle-orm";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { isDeepStrictEqual } from "node:util";
+import { validateDispatchState } from "../lib/dispatch-validation";
 
 const router: IRouter = Router();
 
@@ -292,34 +293,6 @@ function validateB2cState(data: JsonObject): string | null {
     }
   }
 
-  return null;
-}
-
-function validateDispatchState(data: JsonObject): string | null {
-  if (!Array.isArray(data.invoices)) {
-    return "Dispatch data must contain an invoices list.";
-  }
-  for (const value of data.invoices) {
-    if (!isObject(value)) return "A dispatch invoice is not valid.";
-    if (value.status !== "Completed") continue;
-    const ready =
-      value.eInvoiceDone === true &&
-      value.eWayDone === true &&
-      /^\d{12}$/.test(String(value.eWayBillNumber ?? "")) &&
-      value.bundleDone === true &&
-      typeof value.lrNumber === "string" &&
-      value.lrNumber.trim().length > 0 &&
-      typeof value.lrPdfObjectPath === "string" &&
-      value.lrPdfObjectPath.length > 0 &&
-      value.whatsappSent === true &&
-      value.courierSent === true &&
-      value.vastraCourierUpdated === true &&
-      typeof value.courierPdfObjectPath === "string" &&
-      value.courierPdfObjectPath.length > 0;
-    if (!ready) {
-      return "A dispatch invoice cannot be completed until every compliance step is done.";
-    }
-  }
   return null;
 }
 

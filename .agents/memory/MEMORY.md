@@ -1,0 +1,1 @@
+- [Invoice extraction boundaries](invoice-extraction-boundaries.md) — preserve human review, private document handling, and explicit shipping-address confirmation.

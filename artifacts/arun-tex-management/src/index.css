@@ -86,4 +86,33 @@ button { cursor: pointer; }
 .employee-form { padding:0 18px 15px; }.swap-note { padding:9px 17px;color:#909188;font-size:9px;background:#faf8f2;border-top:1px solid #efede7; }.swap-button { border:1px solid #e2ded2;background:#f9f7f0;color:#567663;padding:5px 8px;border-radius:5px;font-size:9px;font-weight:600; }.swap-button:disabled { opacity:.45;cursor:not-allowed; }
 .doc-upload { min-height:42px;border:1px dashed #d9d4c6;background:#faf8f2;border-radius:6px;padding:7px 9px;display:flex;align-items:center;gap:8px;color:#547461;font-size:9px;font-weight:600;cursor:pointer; }.doc-upload input { width:145px;color:#82867d;font-size:8px; }.doc-upload small { margin-left:auto;color:#9b9c91;font-size:8px;font-weight:400; }.document-row { display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:11px; }
 .error-actions { display:flex;align-items:center;gap:16px; }
+.invoice-review {padding:20px}
+.invoice-review h2 {margin-bottom:16px}
+.invoice-fieldset {border:0;padding:0;margin:15px 0 0;min-width:0}
+.invoice-review-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.invoice-review-grid label {display:flex;flex-direction:column;gap:6px;font-size:12px;color:#536156}
+.invoice-review-grid input,.invoice-review-grid textarea {width:100%;padding:9px;border:1px solid #d9d4c6;border-radius:5px;background:#fffdf7;font:inherit}
+.invoice-review p,.invoice-warnings {font-size:12px;line-height:1.6}
+.invoice-warnings {color:#944330;background:#fff4e8;padding:12px 28px;border-radius:6px}
+.invoice-review-confirm {display:flex;align-items:center;gap:9px;margin:18px 0;font-size:12px}
+.invoice-id-summary {font-size:11px;line-height:1.7;margin:12px 0;overflow-wrap:anywhere}
+.label-print-root {position:fixed;inset:0;z-index:1000;overflow:auto;background:#e9e9e9;padding:24px;color:#000;font-family:Arial,sans-serif}
+.label-preview-tools {max-width:650px;margin:0 auto 24px;font-size:13px}
+.courier-label {width:4in;height:2in;box-sizing:border-box;padding:.1in;background:white;color:black;margin:0 auto 16px;break-inside:avoid;break-after:page}
+.courier-label:last-child {break-after:auto}
+.courier-label-content {width:100%;height:100%;overflow:hidden;font:8pt/1.2 Arial,sans-serif;overflow-wrap:anywhere}
+.courier-label header,.label-invoice {display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid black;padding-bottom:3px;margin-bottom:4px}
+.courier-label header {font-size:8pt}
+.label-customer {display:block;font-size:10pt;margin-bottom:3px}
+.label-address {white-space:pre-wrap;margin-bottom:5px}
+.label-parties {display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:7.5pt;margin-bottom:4px}
+.courier-label footer {border-top:1px solid black;padding-top:3px;font-size:8pt}
+@media(max-width:600px) {.invoice-review-grid {grid-template-columns:1fr}.label-print-root {padding:12px 0}.label-preview-tools {padding:0 12px}}
+@media print {
+  body:has(>.label-print-root)>:not(.label-print-root) {display:none!important}
+  body:has(>.label-print-root) {margin:0!important;padding:0!important;background:white!important}
+  .label-print-root {position:static;overflow:visible;padding:0;background:white}
+  .label-preview-tools {display:none!important}
+  .courier-label {margin:0;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+}
 .mix-heading { display:flex;justify-content:space-between;padding:13px 20px 9px;color:#999a90;font:600 8px var(--app-font-mono);letter-spacing:.08em; }.payment-mix { padding:3px 20px 10px;display:grid;gap:12px; }.mix-label { display:flex;justify-content:space-between;align-items:center;color:#6f7972;font-size:9px;margin-bottom:6px; }.mix-label span { display:flex;align-items:center;gap:7px; }.mix-label strong { color:#46534d;font-size:10px; }.mix-label i,.chart-legend i { width:7px;height:7px;border-radius:50%;background:#4f876d; }.mix-upi { background:#c5a45c!important; }.mix-card { background:#7890a0!important; }.mix-track { height:5px;background:#eeece4;border-radius:5px;overflow:hidden; }.mix-track i { display:block;height:100%;border-radius:5px;background:#4f876d;transition:width .3s ease; }

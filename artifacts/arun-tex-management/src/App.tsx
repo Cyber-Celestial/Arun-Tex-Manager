@@ -8,6 +8,9 @@ import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
+import { DispatchInvoiceForm } from '@/components/dispatch-invoice-form';
+import { DispatchLabels } from '@/components/dispatch-labels';
+import { dispatchComplete, invoiceErrors, validIrn, validEway } from '@/lib/dispatch-invoice';
 import {
   getGetWorkspaceMeQueryKey, getGetWorkspaceStateQueryKey, getListWorkspaceUsersQueryKey, useGetWorkspaceMe,
   useGetWorkspaceState, useListWorkspaceUsers, useRequestUploadUrl, useUpdateAttendanceState,
@@ -370,21 +373,49 @@ function Reconciliation({ state, canEdit, role, save }: { state: AnyObj; canEdit
   </div>;
 }
 
-function Dispatch({ state, canEdit, save }: { state: AnyObj; canEdit: boolean; save:(data:AnyObj)=>void }) {
+function Dispatch({ state, canEdit, save }: { state: AnyObj; canEdit: boolean; save:(data:AnyObj)=>Promise<unknown> }) {
   const [filter,setFilter]=useState('All'); const [search,setSearch]=useState('');
-  const [showCreate,setShowCreate]=useState(false); const [number,setNumber]=useState(''); const [customer,setCustomer]=useState(''); const [shipTo,setShipTo]=useState('');
+  const [showCreate,setShowCreate]=useState(false);
+  const [editing,setEditing]=useState<number|null>(null);
+  const [labels,setLabels]=useState<AnyObj[]|null>(null);
+  const [error,setError]=useState('');
   const invoices:AnyObj[]=arr(state.invoices);
-  const update=(i:number,patch:AnyObj)=>{const next=[...invoices];const item={...next[i],...patch}; const complete=Boolean(item.eInvoiceDone&&item.eWayDone&&item.bundleDone&&item.lrNumber&&item.lrPdfObjectPath&&item.whatsappSent&&item.courierSent&&item.courierPdfObjectPath&&item.vastraCourierUpdated);item.status=complete?'Completed':'Pending';next[i]=item;save({...state,invoices:next});};
-  const addInvoice=()=>{if(!number.trim()||!customer.trim())return;save({...state,invoices:[...invoices,{invoiceNumber:number.trim(),customerName:customer.trim(),shipToDetails:shipTo.trim(),date:new Date().toISOString(),status:'Pending',eInvoiceDone:false,eWayDone:false,bundleDone:false,whatsappSent:false,courierSent:false,vastraCourierUpdated:false}]});setNumber('');setCustomer('');setShipTo('');setShowCreate(false);};
+  const update=(i:number,patch:AnyObj)=>{
+    const next=[...invoices];const item={...next[i],...patch};
+    if (item.eInvoiceDone && !validIrn(item.eInvoiceIrn)) {setError('Enter and review a valid 64-character IRN before marking E-invoice done.');return;}
+    if (item.eWayDone && !validEway(item.eWayBillNumber)) {setError('Enter and review a valid 12-digit e-way bill number before marking E-way bill done.');return;}
+    item.status=dispatchComplete(item)?'Completed':'Pending';next[i]=item;setError('');void save({...state,invoices:next}).catch(()=>setError('Could not save the dispatch change. Refresh and try again.'));
+  };
+  const saveInvoice=async(item:AnyObj)=>{
+    item={...item,invoiceNumber:item.invoiceNumber.trim(),eInvoiceIrn:item.eInvoiceIrn.trim(),eWayBillNumber:item.eWayBillNumber.trim()};
+    if(invoices.some((v,i)=>i!==editing&&String(v.invoiceNumber).trim().toLowerCase()===item.invoiceNumber.toLowerCase()))throw new Error('That invoice number already exists. Correct the existing record instead.');
+    item.eInvoiceDone=!!item.eInvoiceDone&&validIrn(item.eInvoiceIrn);item.eWayDone=!!item.eWayDone&&validEway(item.eWayBillNumber);
+    item.status=dispatchComplete(item)?'Completed':'Pending';
+    await save({...state,invoices:editing===null?[...invoices,item]:invoices.map((v,i)=>i===editing?item:v)});
+    setError('');
+    setShowCreate(false);setEditing(null);
+  };
   const visible: Array<AnyObj & {_idx:number}>=invoices.map((v,i)=>({...v,_idx:i} as AnyObj & {_idx:number})).filter(v=>(filter==='All'||v.status===filter)&&`${v.invoiceNumber} ${v.customerName}`.toLowerCase().includes(search.toLowerCase()));
-  const printLabels=()=>window.print();
+  const printLabels=(items:AnyObj[]=visible)=>{
+    if(items.some(v=>invoiceErrors(v).length)){setError('Review invoice details, delivery address and any invalid compliance IDs before printing.');return;}
+    setLabels(items);setError('');
+  };
   return <div className="page-stack">
-    <PageIntro eyebrow="B2B · DISPATCH DESK" title="Dispatch, without the loose ends." description="Make each compliance step visible before a bundle leaves the floor." actions={<><Button onClick={()=>setShowCreate(v=>!v)} disabled={!canEdit}>+ Add B2B invoice</Button><Button kind="primary" onClick={printLabels}><Printer size={15}/> Print labels</Button></>}/>
-    {showCreate&&<Panel className="exception-form"><PanelHeading kicker="NEW DISPATCH RECORD" title="Add B2B invoice"/><div className="form-row"><label>Invoice number<input value={number} onChange={e=>setNumber(e.target.value)} placeholder="Invoice reference"/></label><label>Customer<input value={customer} onChange={e=>setCustomer(e.target.value)} placeholder="Customer name"/></label><label>Ship-to details<input value={shipTo} onChange={e=>setShipTo(e.target.value)} placeholder="Delivery address"/></label><Button kind="primary" disabled={!number.trim()||!customer.trim()} onClick={addInvoice}>Save invoice</Button></div></Panel>}
+    <PageIntro eyebrow="B2B · DISPATCH DESK" title="Dispatch, without the loose ends." description="Make each compliance step visible before a bundle leaves the floor." actions={<><Button onClick={()=>{setEditing(null);setShowCreate(v=>!v);}} disabled={!canEdit}>+ Add B2B invoice</Button><Button kind="primary" onClick={()=>printLabels()} disabled={!visible.length}><Printer size={15}/> Print filtered labels</Button></>}/>
+    {error&&<p role="alert" className="invoice-warnings">{error}</p>}
+    {(showCreate||editing!==null)&&<DispatchInvoiceForm key={editing??'new'} initial={editing===null?undefined:invoices[editing]} onSave={saveInvoice} onCancel={()=>{setShowCreate(false);setEditing(null);}}/>}
+    {labels&&<DispatchLabels invoices={labels} onClose={()=>setLabels(null)}/>}
     <div className="dispatch-banner"><div className="banner-icon"><PackageCheck size={19}/></div><div><strong>Compliance before courier handoff</strong><p>Complete e-invoice, e-way bill, bundle and carrier details. WhatsApp is not connected: send outside this app, then mark it sent.</p></div><span className="banner-count">{invoices.filter(i=>i.status==='Completed').length}<small>DONE</small></span></div>
     <div className="dispatch-summary"><Metric label="Invoices in queue" value={String(invoices.length)} note="B2B orders awaiting handoff" icon={FileText}/><Metric label="Ready to dispatch" value={String(invoices.filter(i=>i.status==='Completed').length)} note="All checklist items complete" icon={CheckCircle2} color="teal"/><Metric label="In progress" value={String(invoices.filter(i=>i.status!=='Completed').length)} note="Compliance steps remaining" icon={Clock3} color="gold"/></div>
     <Panel><div className="panel-heading dispatch-heading"><div><div className="eyebrow">ORDER COMPLIANCE</div><h2>Dispatch checklist</h2></div><div className="dispatch-filters"><div className="search-box"><Search size={15}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search invoice or customer" data-testid="input-search-dispatch"/></div><select value={filter} onChange={e=>setFilter(e.target.value)} data-testid="select-dispatch-status"><option>All</option><option>Pending</option><option>Completed</option></select></div></div>
-      {visible.length ? <div className="dispatch-list">{visible.map((invoice)=>{const steps=[['eInvoiceDone','E-invoice'],['eWayDone','E-way bill'],['bundleDone','Bundle'],['lrNumber','LR number'],['whatsappSent','WhatsApp'],['courierSent','Courier'],['vastraCourierUpdated','Vastra updated']] as const;return <article className="dispatch-card" key={invoice.invoiceNumber || invoice._idx}><div className="dispatch-card-top"><div><span className="mono invoice-ref">{invoice.invoiceNumber || 'B2B INVOICE'}</span><strong>{invoice.customerName || 'Customer details pending'}</strong><small>{shortDate(invoice.date)} · {invoice.shipToDetails || invoice.billToDetails || 'Address not recorded'}</small></div><StatusPill tone={invoice.status==='Completed'?'good':'warn'}>{invoice.status || 'Pending'}</StatusPill></div><div className="checklist">{steps.map(([key,label])=>{const done=key==='lrNumber'?Boolean(invoice.lrNumber):Boolean(invoice[key]);return <button key={key} className={`check-step ${done?'checked':''}`} disabled={!canEdit} onClick={()=>update(invoice._idx,key==='lrNumber'?{lrNumber:invoice.lrNumber || 'LR pending'}:{[key]:!invoice[key]})} data-testid={`button-dispatch-${key}-${invoice._idx}`}><span className="check-box">{done&&<Check size={12}/>}</span><span>{label}</span></button>;})}</div><div className="dispatch-fields"><label>LR / tracking no.<input value={invoice.lrNumber || ''} disabled={!canEdit} placeholder="Enter carrier LR number" onChange={e=>update(invoice._idx,{lrNumber:e.target.value})}/></label><label>WhatsApp recipient<input value={invoice.whatsappRecipient || ''} disabled={!canEdit} placeholder="Customer phone number" onChange={e=>update(invoice._idx,{whatsappRecipient:e.target.value})}/></label><label>E-way bill no.<input value={invoice.eWayBillNumber || ''} disabled={!canEdit} placeholder="Bill reference" onChange={e=>update(invoice._idx,{eWayBillNumber:e.target.value})}/></label></div><div className="document-row"><DocumentUpload label={invoice.lrPdfObjectPath?'LR PDF attached':'Attach LR PDF'} disabled={!canEdit} onUploaded={path=>update(invoice._idx,{lrPdfObjectPath:path})}/><DocumentUpload label={invoice.courierPdfObjectPath?'Courier PDF attached':'Attach courier PDF'} disabled={!canEdit} onUploaded={path=>update(invoice._idx,{courierPdfObjectPath:path})}/></div></article>;})}</div>:<TableEmpty text="No dispatch invoices match this view. Add dispatch data to the workspace to begin."/>}</Panel>
+      {visible.length ? <div className="dispatch-list">{visible.map(invoice=><article className="dispatch-card" key={invoice.invoiceNumber || invoice._idx}>
+        <div className="dispatch-card-top"><div><span className="mono invoice-ref">{invoice.invoiceNumber}</span><strong>{invoice.customerName}</strong><small>{shortDate(invoice.date)} · {invoice.shipToDetails || 'Address not recorded'}</small></div><StatusPill tone={dispatchComplete(invoice)?'good':'warn'}>{dispatchComplete(invoice)?'Completed':'Pending'}</StatusPill></div>
+        <div className="intro-actions"><Button disabled={!canEdit} onClick={()=>{setEditing(invoice._idx);setShowCreate(false);setError('');}}>Review / correct invoice</Button><Button onClick={()=>printLabels([invoice])}>Print label</Button>{invoice.invoicePdfObjectPath&&<a href={`/api/storage${invoice.invoicePdfObjectPath}`} target="_blank" rel="noreferrer">Original invoice PDF</a>}</div>
+        <div className="invoice-id-summary"><div>IRN: <span>{invoice.eInvoiceIrn || 'Not recorded'}</span></div><div>E-way bill: <span>{invoice.eWayBillNumber || 'Not recorded'}</span></div></div>
+        <div className="checklist">{([['eInvoiceDone','E-invoice'],['eWayDone','E-way bill'],['bundleDone','Bundle'],['whatsappSent','WhatsApp'],['courierSent','Courier'],['vastraCourierUpdated','Vastra updated']] as const).map(([key,label])=><button key={key} className={`check-step ${invoice[key]?'checked':''}`} disabled={!canEdit} onClick={()=>update(invoice._idx,{[key]:!invoice[key]})} data-testid={`button-dispatch-${key}-${invoice._idx}`}><span className="check-box">{invoice[key]&&<Check size={12}/>}</span><span>{label}</span></button>)}</div>
+        <div className="dispatch-fields"><label>LR / tracking no.<input value={invoice.lrNumber || ''} disabled={!canEdit} maxLength={60} placeholder="Enter carrier LR number" onChange={e=>update(invoice._idx,{lrNumber:e.target.value})}/></label><label>Courier name<input value={invoice.courierName || ''} disabled={!canEdit} maxLength={60} onChange={e=>update(invoice._idx,{courierName:e.target.value})}/></label><label>WhatsApp recipient<input value={invoice.whatsappRecipient || ''} disabled={!canEdit} onChange={e=>update(invoice._idx,{whatsappRecipient:e.target.value})}/></label></div>
+        <div className="document-row"><DocumentUpload label={invoice.lrPdfObjectPath?'LR PDF attached':'Attach LR PDF'} disabled={!canEdit} onUploaded={path=>update(invoice._idx,{lrPdfObjectPath:path})}/><DocumentUpload label={invoice.courierPdfObjectPath?'Courier PDF attached':'Attach courier PDF'} disabled={!canEdit} onUploaded={path=>update(invoice._idx,{courierPdfObjectPath:path})}/></div>
+      </article>)}</div>:<TableEmpty text="No dispatch invoices match this view. Add dispatch data to the workspace to begin."/>}</Panel>
     {!canEdit&&<div className="recon-footnote"><ShieldCheck size={15}/> Read-only access. Ask an Admin to update dispatch compliance.</div>}
   </div>;
 }
@@ -467,7 +498,7 @@ function WorkspaceApp() {
   return <AppShell role={role} name={name}><ErrorBoundary resetKey={loc}><Switch>
     <Route path="/"><Overview state={data}/></Route>
     <Route path="/reconciliation">{canOperate||role==='accounts'?<Reconciliation state={data.b2c as AnyObj} canEdit={canOperate} role={role} save={next=>save(b2c,next)}/>:<AccessDenied/>}</Route>
-    <Route path="/dispatch">{canOperate?<Dispatch state={data.dispatch as AnyObj} canEdit={canOperate} save={next=>save(dispatch,next)}/>:<AccessDenied/>}</Route>
+    <Route path="/dispatch">{canOperate?<Dispatch state={data.dispatch as AnyObj} canEdit={canOperate} save={next=>dispatch.mutateAsync({data:{expectedVersion:data.version,data:next}})}/>:<AccessDenied/>}</Route>
     <Route path="/people">{canPeople?<People state={data.hr as AnyObj} canEdit={role==='admin'} canLog={canPeople} save={next=>save(hr,next)} saveAttendance={next=>save(attendance,next)}/>:<AccessDenied/>}</Route>
     <Route path="/payroll">{canPeople?<Payroll state={data.hr as AnyObj} canEdit={role==='admin'} save={next=>save(hr,next)}/>:<AccessDenied/>}</Route>
     <Route path="/team">{role==='admin'?<Team role={role} users={(usersQuery.data||[]) as WorkspaceUser[]} loading={usersQuery.isLoading} onRole={(userId,nextRole)=>roleMutation.mutate({userId,data:{role:nextRole}},{onSuccess:()=>queryClient.invalidateQueries({queryKey:getListWorkspaceUsersQueryKey()})})}/>:<AccessDenied/>}</Route>
