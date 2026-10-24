@@ -465,12 +465,12 @@ function WorkspaceApp() {
   const canOperate=role==='admin'||role==='billing';
   const canPeople=role==='admin'||role==='accounts';
   return <AppShell role={role} name={name}><ErrorBoundary resetKey={loc}><Switch>
-    <Route path="/" component={()=><Overview state={data}/>}/>
-    <Route path="/reconciliation" component={()=><>{canOperate||role==='accounts'?<Reconciliation state={data.b2c as AnyObj} canEdit={canOperate} role={role} save={next=>save(b2c,next)}/>:<AccessDenied/>}</>}/>
-    <Route path="/dispatch" component={()=><>{canOperate?<Dispatch state={data.dispatch as AnyObj} canEdit={canOperate} save={next=>save(dispatch,next)}/>:<AccessDenied/>}</>}/>
-    <Route path="/people" component={()=><>{canPeople?<People state={data.hr as AnyObj} canEdit={role==='admin'} canLog={canPeople} save={next=>save(hr,next)} saveAttendance={next=>save(attendance,next)}/>:<AccessDenied/>}</>}/>
-    <Route path="/payroll" component={()=><>{canPeople?<Payroll state={data.hr as AnyObj} canEdit={role==='admin'} save={next=>save(hr,next)}/>:<AccessDenied/>}</>}/>
-    <Route path="/team" component={()=><>{role==='admin'?<Team role={role} users={(usersQuery.data||[]) as WorkspaceUser[]} loading={usersQuery.isLoading} onRole={(userId,nextRole)=>roleMutation.mutate({userId,data:{role:nextRole}},{onSuccess:()=>queryClient.invalidateQueries({queryKey:getListWorkspaceUsersQueryKey()})})}/>:<AccessDenied/>}</>}/>
+    <Route path="/"><Overview state={data}/></Route>
+    <Route path="/reconciliation">{canOperate||role==='accounts'?<Reconciliation state={data.b2c as AnyObj} canEdit={canOperate} role={role} save={next=>save(b2c,next)}/>:<AccessDenied/>}</Route>
+    <Route path="/dispatch">{canOperate?<Dispatch state={data.dispatch as AnyObj} canEdit={canOperate} save={next=>save(dispatch,next)}/>:<AccessDenied/>}</Route>
+    <Route path="/people">{canPeople?<People state={data.hr as AnyObj} canEdit={role==='admin'} canLog={canPeople} save={next=>save(hr,next)} saveAttendance={next=>save(attendance,next)}/>:<AccessDenied/>}</Route>
+    <Route path="/payroll">{canPeople?<Payroll state={data.hr as AnyObj} canEdit={role==='admin'} save={next=>save(hr,next)}/>:<AccessDenied/>}</Route>
+    <Route path="/team">{role==='admin'?<Team role={role} users={(usersQuery.data||[]) as WorkspaceUser[]} loading={usersQuery.isLoading} onRole={(userId,nextRole)=>roleMutation.mutate({userId,data:{role:nextRole}},{onSuccess:()=>queryClient.invalidateQueries({queryKey:getListWorkspaceUsersQueryKey()})})}/>:<AccessDenied/>}</Route>
     <Route component={NotFound}/>
   </Switch></ErrorBoundary></AppShell>;
 
@@ -483,14 +483,14 @@ function AuthRouter() {
   if(!isLoaded)return <LoadingView/>;
   if(!isSignedIn)return <AuthPage mode={loc.startsWith('/sign-up')?'up':'in'}/>;
   return <><ClerkCacheInvalidator/><Switch>
-    <Route path="/sign-in/*?" component={()=> <AuthPage mode="in"/>}/>
-    <Route path="/sign-up/*?" component={()=> <AuthPage mode="up"/>}/>
-    <Route path="/" component={()=><WorkspaceApp/>}/>
-    <Route path="/reconciliation" component={()=><WorkspaceApp/>}/>
-    <Route path="/dispatch" component={()=><WorkspaceApp/>}/>
-    <Route path="/people" component={()=><WorkspaceApp/>}/>
-    <Route path="/payroll" component={()=><WorkspaceApp/>}/>
-    <Route path="/team" component={()=><WorkspaceApp/>}/>
+    <Route path="/sign-in/*?"><AuthPage mode="in"/></Route>
+    <Route path="/sign-up/*?"><AuthPage mode="up"/></Route>
+    <Route path="/" component={WorkspaceApp}/>
+    <Route path="/reconciliation" component={WorkspaceApp}/>
+    <Route path="/dispatch" component={WorkspaceApp}/>
+    <Route path="/people" component={WorkspaceApp}/>
+    <Route path="/payroll" component={WorkspaceApp}/>
+    <Route path="/team" component={WorkspaceApp}/>
     <Route component={NotFound}/>
   </Switch></>;
 }
