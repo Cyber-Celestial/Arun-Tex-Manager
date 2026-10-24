@@ -24,6 +24,7 @@ import {
 } from "@workspace/db";
 import { and, eq, sql } from "drizzle-orm";
 import { Router, type IRouter, type Request, type Response } from "express";
+import { isDeepStrictEqual } from "node:util";
 
 const router: IRouter = Router();
 
@@ -242,29 +243,31 @@ function validateB2cState(data: JsonObject): string | null {
       if (![cash, upi, card].every((part) => Number.isFinite(part) && part >= 0)) {
         return "Payment amounts must be valid, non-negative numbers.";
       }
-      if (
-        transaction.paymentMode === "SPLIT" &&
-        Math.round((cash + upi + card) * 100) !== Math.round(amount * 100)
-      ) {
-        return `Split payment for ${String(transaction.invoiceNumber ?? "an invoice")} does not equal its invoice amount.`;
-      }
-      if (
-        transaction.paymentMode === "CASH" &&
-        Math.round(cash * 100) !== Math.round(amount * 100)
-      ) {
-        return "Cash payments must equal the invoice amount.";
-      }
-      if (
-        transaction.paymentMode === "UPI" &&
-        Math.round(upi * 100) !== Math.round(amount * 100)
-      ) {
-        return "UPI payments must equal the invoice amount.";
-      }
-      if (
-        transaction.paymentMode === "CARD" &&
-        Math.round(card * 100) !== Math.round(amount * 100)
-      ) {
-        return "Card payments must equal the invoice amount.";
+      if (batch.status === "Submitted") {
+        if (
+          transaction.paymentMode === "SPLIT" &&
+          Math.round((cash + upi + card) * 100) !== Math.round(amount * 100)
+        ) {
+          return `Split payment for ${String(transaction.invoiceNumber ?? "an invoice")} does not equal its invoice amount.`;
+        }
+        if (
+          transaction.paymentMode === "CASH" &&
+          Math.round(cash * 100) !== Math.round(amount * 100)
+        ) {
+          return "Cash payments must equal the invoice amount.";
+        }
+        if (
+          transaction.paymentMode === "UPI" &&
+          Math.round(upi * 100) !== Math.round(amount * 100)
+        ) {
+          return "UPI payments must equal the invoice amount.";
+        }
+        if (
+          transaction.paymentMode === "CARD" &&
+          Math.round(card * 100) !== Math.round(amount * 100)
+        ) {
+          return "Card payments must equal the invoice amount.";
+        }
       }
       cashSales += cash;
     }
@@ -302,6 +305,7 @@ function validateDispatchState(data: JsonObject): string | null {
     const ready =
       value.eInvoiceDone === true &&
       value.eWayDone === true &&
+      /^\d{12}$/.test(String(value.eWayBillNumber ?? "")) &&
       value.bundleDone === true &&
       typeof value.lrNumber === "string" &&
       value.lrNumber.trim().length > 0 &&
@@ -328,6 +332,22 @@ function validateHrState(data: JsonObject): string | null {
   }
   if (!Array.isArray(data.noteAdvances) || !Array.isArray(data.salaryAdvances)) {
     return "HR data must contain both advance lists.";
+  }
+  const validAttendanceTypes = new Set([
+    "Informed Absent",
+    "Uninformed Absent",
+    "Paid Leave",
+    "Half-Day",
+    "On-Duty",
+  ]);
+  if (
+    data.attendance.some(
+      (entry) =>
+        !isObject(entry) ||
+        !validAttendanceTypes.has(String(entry.exceptionType)),
+    )
+  ) {
+    return "Attendance entries must use a supported exception type.";
   }
   for (const advanceValue of data.noteAdvances) {
     if (!isObject(advanceValue)) return "A note advance is not valid.";
@@ -483,8 +503,49 @@ async function writeModule(
     res.status(400).json({ error: "Attendance data must contain an exceptions list." });
     return;
   }
+  if (
+    module === "attendance" &&
+    (data.attendance as unknown[]).some(
+      (entry) =>
+        !isObject(entry) ||
+        !new Set([
+          "Informed Absent",
+          "Uninformed Absent",
+          "Paid Leave",
+          "Half-Day",
+          "On-Duty",
+        ]).has(String(entry.exceptionType)),
+    )
+  ) {
+    res.status(400).json({ error: "Attendance entries must use a supported exception type." });
+    return;
+  }
 
   await ensureStateRow();
+  if (module === "b2c") {
+    const [current] = await db
+      .select({ b2c: operationsStateTable.b2c })
+      .from(operationsStateTable)
+      .where(eq(operationsStateTable.id, "main"))
+      .limit(1);
+    const currentBatches =
+      isObject(current?.b2c) && Array.isArray(current.b2c.batches)
+        ? current.b2c.batches
+        : [];
+    const nextBatches = Array.isArray(data.batches) ? data.batches : [];
+    const changedFinalizedBatch = currentBatches.some(
+      (batch, index) =>
+        isObject(batch) &&
+        batch.status === "Submitted" &&
+        !isDeepStrictEqual(batch, nextBatches[index]),
+    );
+    if (changedFinalizedBatch) {
+      res.status(409).json({
+        error: "Submitted batches are locked. Start a new batch for later adjustments.",
+      });
+      return;
+    }
+  }
   const whereVersion = and(
     eq(operationsStateTable.id, "main"),
     eq(operationsStateTable.version, requestData.expectedVersion),
