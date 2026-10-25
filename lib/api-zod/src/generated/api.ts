@@ -48,7 +48,7 @@ export const GetWorkspaceStateResponse = zod.object({
 
 
 /**
- * @summary Save B2C reconciliation data
+ * @summary Save B2C data
  */
 export const updateB2cStateBodyExpectedVersionMin = 0;
 
@@ -66,7 +66,7 @@ export const UpdateB2cStateResponse = zod.object({
 
 
 /**
- * @summary Add HDFC bank statement deposits to one reconciliation (Accounts or Admin)
+ * @summary Add HDFC bank statement deposits to one B2C day (Accounts or Admin)
  */
 export const updateB2cBankStateBodyExpectedVersionMin = 0;
 
