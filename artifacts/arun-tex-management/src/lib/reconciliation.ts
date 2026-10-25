@@ -50,3 +50,14 @@ export function oneEntryPerInvoice<T extends Record<string, any>>(lines: T[]) {
   }
   return { rows: [...first.values()], merged, conflicts: [...conflicts] };
 }
+
+export type UploadKind = 'invoice' | 'return';
+export type UploadSlot = { done: boolean; count: number; fileName: string | null };
+
+/** A B2C day has two upload slots: one sales invoice file and one sales return file. */
+export function uploadSlot(batch: Record<string, any>, kind: UploadKind): UploadSlot {
+  const rows = (Array.isArray(batch.transactions) ? batch.transactions : []).filter((row: Record<string, any>) => (row.type === 'Return') === (kind === 'return'));
+  const stamp = batch[kind === 'return' ? 'returnImport' : 'invoiceImport'];
+  const fileName = stamp && typeof stamp === 'object' && stamp.fileName ? String(stamp.fileName) : null;
+  return { done: rows.length > 0 || Boolean(stamp && typeof stamp === 'object'), count: rows.length, fileName };
+}

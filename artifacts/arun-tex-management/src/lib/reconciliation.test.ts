@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { batchStage, emptyReconciliation, onlinePaymentCounts, oneEntryPerInvoice, reconciliationLabel, reconciliationUploaded } from './reconciliation';
+import { batchStage, emptyReconciliation, onlinePaymentCounts, oneEntryPerInvoice, reconciliationLabel, reconciliationUploaded, uploadSlot } from './reconciliation';
 
 test('new dated batches are empty, independently identified and not uploaded', () => {
   const first=emptyReconciliation('2024-02-29'),second=emptyReconciliation('2024-02-29');
@@ -41,4 +41,13 @@ test('lines of one invoice with different totals are reported, first line wins',
   assert.equal(result.rows.length,1);
   assert.equal(result.rows[0].totalInvoiceAmount,100);
   assert.deepEqual(result.conflicts,['INV-9']);
+});
+
+test('upload slots tell the invoice file and the return file apart', () => {
+  const day={transactions:[{type:'Invoice'},{type:'Invoice'},{type:'Return'}],invoiceImport:{fileName:'inv.xlsx'}};
+  assert.deepEqual(uploadSlot(day,'invoice'),{done:true,count:2,fileName:'inv.xlsx'});
+  assert.deepEqual(uploadSlot(day,'return'),{done:true,count:1,fileName:null});
+  assert.deepEqual(uploadSlot({transactions:[{type:'Invoice'}],invoiceImport:{fileName:'a.xlsx'}},'return'),{done:false,count:0,fileName:null});
+  assert.deepEqual(uploadSlot({transactions:[]},'invoice'),{done:false,count:0,fileName:null});
+  assert.equal(uploadSlot({transactions:[],returnImport:{fileName:'r.xlsx'}},'return').done,true);
 });

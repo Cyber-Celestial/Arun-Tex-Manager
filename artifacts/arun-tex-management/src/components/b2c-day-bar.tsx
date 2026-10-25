@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import 'react-day-picker/style.css';
 import './b2c-day-bar.css';
 
-export type B2cDaySummary = { count: number; stage: string };
+export type B2cDaySummary = { count: number; returns: number; stage: string };
 
 const parseKey = (key: string) => new Date(`${key}T12:00:00`);
 const keyOf = (day: Date) =>
@@ -39,7 +39,7 @@ export function B2cDayBar({ value, today, days, onSelect }: {
     <button type="button" className="b2c-day-trigger" aria-haspopup="dialog" aria-expanded={open}
       onClick={() => setOpen(v => !v)} data-testid="button-b2c-day">
       <strong>{label(value)}</strong>
-      <small>{summary ? `${summary.count} invoices · ${summary.stage}` : 'No B2C yet'}</small>
+      <small>{summary ? `${summary.count} invoices${summary.returns ? ` · ${summary.returns} returns` : ''} · ${summary.stage}` : 'No B2C yet'}</small>
     </button>
     <button type="button" className="b2c-day-arrow" disabled={!next} onClick={() => next && onSelect(next)}
       aria-label="Next B2C day" title={next ? `Next B2C day: ${label(next)}` : 'No later B2C day'} data-testid="button-b2c-next"><ChevronRight size={16}/></button>

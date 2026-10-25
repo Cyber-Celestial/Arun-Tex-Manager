@@ -359,6 +359,7 @@ function accountsB2cView(b2c: JsonObject): JsonObject {
         transactions: record.transactions,
         bankRows: record.bankRows,
         invoiceImport: record.invoiceImport,
+        returnImport: record.returnImport,
         tallyExport: record.status === "Submitted" ? record.tallyExport : undefined,
       };
     }),

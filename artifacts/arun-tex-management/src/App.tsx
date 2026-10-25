@@ -12,8 +12,9 @@ import { DeleteDayControl } from '@/components/delete-day-control';
 import { OverviewCollectionStrip } from '@/components/overview-collection-strip';
 import { OverviewDayPicker } from '@/components/overview-day-picker';
 import { businessDate, localDateKey, pulseTransactions, summarizePulse } from '@/lib/pulse-data';
-import { batchStage, invoiceKey, oneEntryPerInvoice, reconciliationLabel, reconciliationUploaded } from '@/lib/reconciliation';
-import { ChangeLog, WorkflowSteps } from '@/components/reconciliation-workflow';
+import { batchStage, invoiceKey, oneEntryPerInvoice, reconciliationLabel, reconciliationUploaded, uploadSlot } from '@/lib/reconciliation';
+import { dateCell, normalizeColumn, parseVastraSheets, readField, type UploadKind } from '@/lib/vastra-import';
+import { ChangeLog, UploadSlots, WorkflowSteps } from '@/components/reconciliation-workflow';
 import { ReconciliationNumberInput } from '@/components/reconciliation-number-input';
 import '@/components/reconciliation-date.css';
 import { Toaster } from '@/components/ui/toaster';
@@ -62,31 +63,6 @@ const money = (n: unknown) => new Intl.NumberFormat('en-IN', { style: 'currency'
 const shortDate = (d: string) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '—';
 const arr = (v: unknown): AnyObj[] => Array.isArray(v) ? v : [];
 const cleanName = (s: string) => s.split(/(?=[A-Z])/).join(' ').replace(/^./, x => x.toUpperCase());
-const normalizeColumn = (value: unknown) => String(value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-function readField(row: Record<string, unknown>, ...labels: string[]) {
-  const candidates = labels.map(normalizeColumn);
-  const entry = Object.entries(row).find(([key]) => {
-    const normalized = normalizeColumn(key);
-    return candidates.some(candidate => normalized === candidate || normalized.includes(candidate));
-  });
-  return entry?.[1];
-}
-function dateCell(value: unknown) {
-  if (value instanceof Date && !Number.isNaN(value.valueOf())) return localDateKey(value);
-  if (typeof value === 'number') {
-    const parsed = XLSX.SSF.parse_date_code(value);
-    if (parsed) return `${parsed.y}-${String(parsed.m).padStart(2, '0')}-${String(parsed.d).padStart(2, '0')}`;
-  }
-  const text = String(value ?? '').trim();
-  if (/^\d{4}-\d{2}-\d{2}(?:$|T)/.test(text)) return businessDate(text);
-  const indian = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
-  if (indian) {
-    const year = indian[3].length === 2 ? `20${indian[3]}` : indian[3];
-    return `${year}-${indian[2].padStart(2, '0')}-${indian[1].padStart(2, '0')}`;
-  }
-  const parsed = new Date(text);
-  return Number.isNaN(parsed.valueOf()) ? '' : localDateKey(parsed);
-}
 function downloadTallyWorkbook(exportData: AnyObj, fallbackDate = 'batch') {
   const workbook = XLSX.utils.book_new();
   const sheet = XLSX.utils.json_to_sheet(arr(exportData.entries));
@@ -292,16 +268,17 @@ function Reconciliation({ state, canEdit, role, save, saveBank, upload, deleteDa
   const [saveError, setSaveError] = useState('');
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
-  const [pendingReplace, setPendingReplace] = useState<{date:string;fileName:string;transactions:AnyObj[];merged:number;conflicts:string[];existing:number} | null>(null);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [pendingReplace, setPendingReplace] = useState<{kind:UploadKind;date:string;fileName:string;transactions:AnyObj[];merged:number;conflicts:string[];existing:number} | null>(null);
   const selected = batches.findIndex(batch => businessDate(batch.date) === dayKey);
   const hasBatch = selected >= 0;
   const active = hasBatch ? batches[selected] : { date: dayKey, status: 'Open', transactions: [], bankRows: [], denominations: {} };
   const tx = arr(active.transactions); const bankRows = arr(active.bankRows);
   const uploaded = reconciliationUploaded(active);
   const duplicateDays = Array.from(new Set(batches.map(batch=>businessDate(batch.date)).filter((day,index,dates)=>day && dates.indexOf(day)!==index)));
-  const dayList = batches.reduce<Record<string,B2cDaySummary>>((acc,batch)=>{const day=businessDate(batch.date);if(day&&!acc[day])acc[day]={count:arr(batch.transactions).length,stage:batchStage(batch).label};return acc;},{});
+  const dayList = batches.reduce<Record<string,B2cDaySummary>>((acc,batch)=>{const day=businessDate(batch.date);if(day&&!acc[day])acc[day]={count:arr(batch.transactions).filter(row=>row.type!=='Return').length,returns:arr(batch.transactions).filter(row=>row.type==='Return').length,stage:batchStage(batch).label};return acc;},{});
   const selectDay = (day:string) => {
-    setDayKey(day); setSaveError(''); setImportMessage(''); setPendingReplace(null);
+    setDayKey(day); setSaveError(''); setImportMessage(''); setPendingReplace(null); setPendingFile(null);
     const url = new URL(window.location.href);
     url.searchParams.set('date',day);
     window.history.replaceState(window.history.state,'',`${url.pathname}${url.search}${url.hash}`);
@@ -315,61 +292,37 @@ function Reconciliation({ state, canEdit, role, save, saveBank, upload, deleteDa
   };
   const update = (next: AnyObj) => runAction(()=>save({ ...state, batches: batches.map((b,i)=>i===selected ? next : b) }));
   const importFile = () => document.getElementById('sales-import')?.click();
-  const uploadDay = async (draft:{date:string;fileName:string;transactions:AnyObj[];merged:number;conflicts:string[]}, replace:boolean) => {
-    await upload({date:draft.date,fileName:draft.fileName,replace,transactions:draft.transactions});
+  const uploadDay = async (draft:{kind:UploadKind;date:string;fileName:string;transactions:AnyObj[];merged:number;conflicts:string[]}, replace:boolean) => {
+    await upload({date:draft.date,fileName:draft.fileName,kind:draft.kind,replace,transactions:draft.transactions});
     selectDay(draft.date);
-    setImportMessage(`${draft.transactions.length} invoices ${replace?'replaced':'saved'} for ${reconciliationLabel(draft.date)}.${draft.merged?` ${draft.merged} extra item lines were merged into one entry per invoice number.`:''}${draft.conflicts.length?` Check the net amount of ${draft.conflicts.join(', ')}: its lines disagreed, the first line was used.`:''} Review split allocations before submitting.`);
+    setImportMessage(`${draft.transactions.length} ${draft.kind==='return'?'sales returns':'invoices'} ${replace?'replaced':'saved'} for ${reconciliationLabel(draft.date)}.${draft.merged?` ${draft.merged} extra item lines were merged into one entry per number.`:''}${draft.conflicts.length?` Check the net amount of ${draft.conflicts.join(', ')}: its lines disagreed, the first line was used.`:''}${draft.kind==='invoice'?' Review split allocations before submitting.':''}`);
   };
   const handleImport = (file?: File) => { if (!file || !canEdit) return;
-    setImportMessage('Reading invoice workbook…'); setPendingReplace(null); void runAction(async () => {
+    setSaveError(''); setImportMessage(''); setPendingReplace(null); setPendingFile(file); };
+  const chooseKind = (kind:UploadKind) => { const file=pendingFile; if (!file) return;
+    setPendingFile(null); setImportMessage('Reading Excel…'); void runAction(async () => {
       let workbook:XLSX.WorkBook;
       try { workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true }); }
-      catch { throw new Error('Could not read that workbook. Use an XLSX, XLS or CSV export. No invoice rows were saved.'); }
-      const imported: AnyObj[] = [];
-      for (const sheetName of workbook.SheetNames) {
-        const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[sheetName], { defval: '' });
-        for (const row of rows) {
-          const returnNumber = readField(row, 'Order Return Number', 'Return Number', 'Order Return No');
-          const invoiceNumber = String(readField(row, 'Invoice Number', 'Invoice No') ?? returnNumber ?? '').trim();
-          const rawAmount = readField(row, 'Invoice Net Amount', 'Order Return Net Amount', 'Net Amount', 'Invoice Amount', 'Amount');
-          const amount = Math.abs(Number(String(rawAmount ?? '').replace(/[₹,\s]/g, '')));
-          if (!invoiceNumber || !Number.isFinite(amount) || amount <= 0) continue;
-          const isReturn = Boolean(returnNumber) || sheetName.toLowerCase().includes('return');
-          const rawMode = String(readField(row, 'Agent Name', 'Payment Mode', 'Mode') ?? '').toUpperCase();
-          const mode = isReturn ? 'RETURN' : rawMode.includes('CASH') ? 'CASH' : rawMode.includes('UPI') ? 'UPI' : rawMode.includes('CARD') ? 'CARD' : 'SPLIT';
-          const cash = Number(readField(row, 'Cash Amount', 'Cash') ?? 0) || 0;
-          const upi = Number(readField(row, 'UPI Amount', 'UPI') ?? 0) || 0;
-          const card = Number(readField(row, 'Card Amount', 'Card') ?? 0) || 0;
-          imported.push({
-            invoiceNumber,
-            date: dateCell(readField(row, 'Invoice Date', 'Order Return Date', 'Date')),
-            totalInvoiceAmount: amount,
-            type: isReturn ? 'Return' : 'Invoice',
-            paymentMode: mode,
-            cashAmount: isReturn ? 0 : mode === 'CASH' ? amount : cash,
-            upiAmount: isReturn ? 0 : mode === 'UPI' ? amount : upi,
-            cardAmount: isReturn ? 0 : mode === 'CARD' ? amount : card,
-            bankVerified: mode === 'CASH' || mode === 'RETURN',
-          });
-        }
-      }
-      if (!imported.length) throw new Error('No invoice rows found. Check that the workbook has Invoice Number, Invoice Date and Invoice Net Amount columns. No invoice rows were saved.');
-      const single=oneEntryPerInvoice(imported);
+      catch { throw new Error('Could not read that file. Use an XLSX, XLS or CSV export. Nothing was saved.'); }
+      const sheets = workbook.SheetNames.map(name=>({ name, rows: XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[name], { defval: '' }) }));
+      const parsed = parseVastraSheets(sheets, kind);
+      if ('error' in parsed) throw new Error(parsed.error);
+      const single=oneEntryPerInvoice(parsed.rows);
       const days=Array.from(new Set(single.rows.map(row=>businessDate(row.date))));
-      if (days.some(day=>!day)) throw new Error('Every invoice needs a valid Invoice Date. No invoice rows were saved.');
-      if (days.length!==1) throw new Error(`This file has invoices for ${days.length} dates (${days.slice(0,4).map(reconciliationLabel).join(', ')}${days.length>4?', …':''}). Upload one day at a time. No invoice rows were saved.`);
+      if (days.some(day=>!day)) throw new Error('Every row needs a valid date. Nothing was saved.');
+      if (days.length!==1) throw new Error(`This file has rows for ${days.length} dates (${days.slice(0,4).map(reconciliationLabel).join(', ')}${days.length>4?', …':''}). Upload one day at a time. Nothing was saved.`);
       const day=days[0];
       const index=batches.findIndex(batch=>businessDate(batch.date)===day);
       const existing=index>=0?batches[index]:undefined;
-      const taken=new Map(batches.flatMap((batch,i)=>i===index?[]:arr(batch.transactions).map(row=>[invoiceKey(row.invoiceNumber),businessDate(batch.date)] as const)));
+      const taken=new Map(batches.flatMap((batch,i)=>arr(batch.transactions).filter(row=>i!==index||((row.type==='Return')!==(kind==='return'))).map(row=>[invoiceKey(row.invoiceNumber),businessDate(batch.date)] as const)));
       const repeated=single.rows.filter(row=>taken.has(invoiceKey(row.invoiceNumber)));
-      if (repeated.length) throw new Error(`Already recorded in B2C for ${reconciliationLabel(taken.get(invoiceKey(repeated[0].invoiceNumber)))}: ${repeated.slice(0,5).map(row=>row.invoiceNumber).join(', ')}${repeated.length>5?` and ${repeated.length-5} more`:''}. Each invoice number can appear only once. No invoice rows were saved.`);
-      const draft={date:day,fileName:file.name,transactions:single.rows,merged:single.merged,conflicts:single.conflicts};
-      if (existing&&reconciliationUploaded(existing)) {
+      if (repeated.length) throw new Error(`Already recorded in B2C for ${reconciliationLabel(taken.get(invoiceKey(repeated[0].invoiceNumber)))}: ${repeated.slice(0,5).map(row=>row.invoiceNumber).join(', ')}${repeated.length>5?` and ${repeated.length-5} more`:''}. Each invoice or return number can appear only once. Nothing was saved.`);
+      const draft={kind,date:day,fileName:file.name,transactions:single.rows as AnyObj[],merged:single.merged,conflicts:single.conflicts};
+      if (existing) {
         if (existing.status==='Submitted') throw new Error(`B2C for ${reconciliationLabel(day)} is locked. An Admin can delete the day first, then upload again.`);
-        if (existing.billingSubmitted&&role!=='admin') throw new Error('The cash batch is submitted. Ask an Admin to replace this day.');
-        selectDay(day); setPendingReplace({...draft,existing:arr(existing.transactions).length});
-        return;
+        if (existing.billingSubmitted&&role!=='admin') throw new Error('The cash batch is submitted. Ask an Admin to change this day.');
+        const slot=uploadSlot(existing,kind);
+        if (slot.done) { selectDay(day); setImportMessage(''); setPendingReplace({...draft,existing:slot.count}); return; }
       }
       await uploadDay(draft,false);
     }); };
@@ -399,7 +352,8 @@ function Reconciliation({ state, canEdit, role, save, saveBank, upload, deleteDa
       setImportMessage(`${dated.length} bank deposits uploaded and matched against invoices.${skipped?` ${skipped} rows without a readable date were skipped.`:''}`);
   },undefined,canBank); };
   const setDenom=(key:string,value:number)=>update({...active,denominations:{...active.denominations,[key]:value}});
-  const total = tx.reduce((s,t)=>s+Number(t.totalInvoiceAmount||0),0);
+  const total = tx.filter(t=>t.type!=='Return').reduce((s,t)=>s+Number(t.totalInvoiceAmount||0),0);
+  const returnCount = tx.filter(t=>t.type==='Return').length;
   const expectedCash = tx.reduce((s,t)=>s+(t.type==='Return'?-Math.abs(Number(t.totalInvoiceAmount)||0):Number(t.cashAmount||0)),0);
   const denomTotal = Object.entries(active.denominations || {}).reduce((s,[k,v])=>s+Number(k)*Number(v||0),0);
   const canExport=role==='admin'||role==='accounts';
@@ -411,16 +365,17 @@ function Reconciliation({ state, canEdit, role, save, saveBank, upload, deleteDa
   const bankEditable=canBank&&hasBatch&&active.status!=='Submitted'&&!busy;
   const matchInvoice = (invoiceNumber:string, rowIndex:number) => { const rows=[...bankRows]; rows[rowIndex]={...rows[rowIndex],matchedInvoiceNumber:invoiceNumber}; update({...active,bankRows:rows}); };
   return <div className="page-stack">
-    <PageIntro eyebrow="VASTRA B2C · SALES CONTROL" title="B2C" description={role==='accounts'?'Pick a business date, upload its HDFC statement and review which online payments matched.':'Browse any date. The invoice date in the Vastra file decides which day an upload belongs to.'} actions={<>{canEdit&&<><input id="sales-import" type="file" accept=".csv,.txt,.xls,.xlsx" disabled={busy} hidden onChange={e=>{handleImport(e.target.files?.[0]);e.target.value='';}}/><Button onClick={importFile} disabled={busy}><FileSpreadsheet size={15}/> Import Vastra workbook</Button></>}{deleteDay&&<DeleteDayControl label="Delete day" noun="B2C invoices" counts={Object.fromEntries(Object.entries(dayList).map(([day,info])=>[day,info.count||1]))} disabled={busy} warning={day=>batches.some(batch=>businessDate(batch.date)===day&&batch.status==='Submitted')?'This day is locked and already exported to Tally.':null} onDelete={async day=>{await deleteDay(day);setPendingReplace(null);setImportMessage(`B2C for ${reconciliationLabel(day)} was deleted.`);}}/>}{canExport&&<Button kind="primary" onClick={exportTally} disabled={active.status!=='Submitted'}><FileDown size={15}/> Export Tally Excel</Button>}</>}/>
+    <PageIntro eyebrow="VASTRA B2C · SALES CONTROL" title="B2C" description={role==='accounts'?'Pick a business date, upload its HDFC statement and review which online payments matched.':'Browse any date. Upload a Vastra invoice file and a sales return file; the date inside each file decides the day.'} actions={<>{canEdit&&<><input id="sales-import" type="file" accept=".csv,.txt,.xls,.xlsx" disabled={busy} hidden onChange={e=>{handleImport(e.target.files?.[0]);e.target.value='';}}/><Button onClick={importFile} disabled={busy}><FileSpreadsheet size={15}/> Upload Excel</Button></>}{deleteDay&&<DeleteDayControl label="Delete day" noun="B2C invoices" counts={Object.fromEntries(Object.entries(dayList).map(([day,info])=>[day,info.count+info.returns||1]))} disabled={busy} warning={day=>batches.some(batch=>businessDate(batch.date)===day&&batch.status==='Submitted')?'This day is locked and already exported to Tally.':null} onDelete={async day=>{await deleteDay(day);setPendingReplace(null);setImportMessage(`B2C for ${reconciliationLabel(day)} was deleted.`);}}/>}{canExport&&<Button kind="primary" onClick={exportTally} disabled={active.status!=='Submitted'}><FileDown size={15}/> Export Tally Excel</Button>}</>}/>
     {importMessage&&<div className="recon-footnote" role="status">{importMessage}</div>}
     {saveError&&<div className="recon-error" role="alert">{saveError}</div>}
-    {pendingReplace&&<div className="b2c-replace" role="alertdialog" aria-label="Replace this day"><strong>B2C for {reconciliationLabel(pendingReplace.date)} already has {pendingReplace.existing} invoices.</strong><span>Replace them with the {pendingReplace.transactions.length} invoices in {pendingReplace.fileName}? Bank rows and cash counts are kept; cash submission and approval start again.</span><div><Button kind="primary" disabled={busy} onClick={()=>void runAction(()=>uploadDay(pendingReplace,true))}>Replace</Button><Button disabled={busy} onClick={()=>{setPendingReplace(null);setImportMessage('Upload cancelled. Nothing was changed.');}}>Cancel</Button></div></div>}
+    {pendingFile&&<div className="b2c-replace" role="alertdialog" aria-label="Which Excel is this"><strong>Which Excel is {pendingFile.name}?</strong><span>The date is read from the file. A day can have one sales invoice file and one sales return file.</span><div><Button kind="primary" disabled={busy} onClick={()=>chooseKind('invoice')}>Sales invoices</Button><Button kind="primary" disabled={busy} onClick={()=>chooseKind('return')}>Sales returns</Button><Button disabled={busy} onClick={()=>{setPendingFile(null);setImportMessage('Upload cancelled. Nothing was changed.');}}>Cancel</Button></div></div>}
+    {pendingReplace&&<div className="b2c-replace" role="alertdialog" aria-label="Replace this upload"><strong>B2C for {reconciliationLabel(pendingReplace.date)} already has {pendingReplace.existing} {pendingReplace.kind==='return'?'sales returns':'invoices'}.</strong><span>Replace them with the {pendingReplace.transactions.length} {pendingReplace.kind==='return'?'sales returns':'invoices'} in {pendingReplace.fileName}? The other file for this day, bank rows and cash counts are kept; cash submission and approval start again.</span><div><Button kind="primary" disabled={busy} onClick={()=>void runAction(()=>uploadDay(pendingReplace,true))}>Replace</Button><Button disabled={busy} onClick={()=>{setPendingReplace(null);setImportMessage('Upload cancelled. Nothing was changed.');}}>Cancel</Button></div></div>}
     {duplicateDays.length>0&&<div className="recon-error" role="status">Legacy duplicate dates: {duplicateDays.map(reconciliationLabel).join(', ')}. Existing records are preserved. Delete the extra day, then upload again.</div>}
     <div className="recon-toolbar"><B2cDayBar value={dayKey} today={localDateKey()} days={dayList} onSelect={selectDay}/><span className="toolbar-divider"/><div className="batch-meta"><span className="green-dot"/><span>{busy?'Saving / reading…':hasBatch?`${tx.length} transactions loaded`:'No B2C on this date'}</span></div></div>
     {hasBatch?<>
     <WorkflowSteps batch={active}/>
-    {uploaded&&<div className="recon-footnote" role="status"><ShieldCheck size={16}/><span>Invoice workbook uploaded for <strong>{reconciliationLabel(active.date)}</strong>. Importing another file for this date asks whether to replace it. Bank matching and payment adjustments remain available until submission.</span></div>}
-    <div className="metric-grid compact-grid"><Metric label="Invoice value" value={money(total)} note={`${tx.length} sales and returns`} icon={FileText}/><Metric label="Cash expected" value={money(expectedCash)} note="From payment allocations" icon={Banknote} color="gold"/>{role!=='accounts'&&<Metric label="Cash counted" value={money(denomTotal)} note={denomTotal===expectedCash?'Denominations balance':'Denominations need review'} icon={ClipboardCheck} color={denomTotal===expectedCash?'teal':'rose'}/>}<Metric label="Bank exceptions" value={`${pending.length}`} note="Card, UPI and split payments" icon={CircleAlert} color="rose"/></div>
+    <UploadSlots batch={active}/>
+    <div className="metric-grid compact-grid"><Metric label="Invoice value" value={money(total)} note={returnCount?`${tx.length-returnCount} invoices · ${returnCount} returns`:`${tx.length} invoices`} icon={FileText}/><Metric label="Cash expected" value={money(expectedCash)} note="From payment allocations" icon={Banknote} color="gold"/>{role!=='accounts'&&<Metric label="Cash counted" value={money(denomTotal)} note={denomTotal===expectedCash?'Denominations balance':'Denominations need review'} icon={ClipboardCheck} color={denomTotal===expectedCash?'teal':'rose'}/>}<Metric label="Bank exceptions" value={`${pending.length}`} note="Card, UPI and split payments" icon={CircleAlert} color="rose"/></div>
     <Panel className="recon-panel"><div className="tabs">{(role==='accounts'?['Transactions','Bank matching']:['Transactions','Bank matching','Denominations']).map(t=><button key={t} onClick={()=>setTab(t)} className={`tab ${tab===t?'tab-active':''}`} data-testid={`tab-${t.toLowerCase().replace(' ','-')}`}>{t}{t==='Bank matching'&&<span className="tab-count">{pending.length}</span>}</button>)}</div>
       {tab==='Transactions' && <><div className="panel-tools"><span className="tool-note"><FileSpreadsheet size={16}/> Vastra invoice register</span><span className="tool-hint">Cash, UPI and card splits must equal each invoice before submission.</span></div>{tx.length ? <div className="table-wrap"><table><thead><tr><th>INVOICE</th><th>DATE</th><th>TYPE</th><th>PAYMENT MODE</th><th>CASH</th><th>UPI</th><th>CARD</th><th className="align-right">INVOICE TOTAL</th></tr></thead><tbody>{tx.map((t,i)=><tr key={`${selected}-${i}-${t.invoiceNumber}`}><td className="strong mono">{t.invoiceNumber || '—'}</td><td>{reconciliationLabel(t.date)}</td><td><StatusPill tone={t.type==='Return'?'bad':'neutral'}>{t.type || 'Invoice'}</StatusPill></td><td><select className="inline-select" value={t.paymentMode || 'CASH'} disabled={!batchEditable} onChange={e=>{const mode=e.target.value,amount=Number(t.totalInvoiceAmount)||0,n=[...tx];n[i]={...t,paymentMode:mode,type:mode==='RETURN'?'Return':'Invoice',cashAmount:mode==='CASH'?amount:0,upiAmount:mode==='UPI'?amount:0,cardAmount:mode==='CARD'?amount:0,bankVerified:mode==='CASH'||mode==='RETURN'};update({...active,transactions:n});}}>{['CASH','CARD','UPI','SPLIT','RETURN'].map(v=><option key={v}>{v}</option>)}</select></td>{['cashAmount','upiAmount','cardAmount'].map(k=><td key={k}><ReconciliationNumberInput label={`${k} ${t.invoiceNumber}`} disabled={!batchEditable||t.type==='Return'} value={Number(t[k] ?? 0)} onCommit={value=>{const n=[...tx];n[i]={...t,[k]:value};void update({...active,transactions:n});}}/></td>)}<td className="align-right mono strong">{money(t.totalInvoiceAmount)}</td></tr>)}</tbody></table></div> : <TableEmpty text="Create a dated B2C day, then import the Vastra B2C workbook to start matching invoices and payments."/>}</>}
       {tab==='Bank matching' && <><div className="panel-tools"><span className="tool-note"><Banknote size={16}/> Deposits and invoice references</span><span className="tool-hint">Matching checks date, deposit amount and payment mode.</span>{canBank?<><input id="bank-import" type="file" accept=".csv,.txt,.xls,.xlsx" hidden onChange={e=>{handleBankImport(e.target.files?.[0]);e.target.value='';}}/><Button onClick={importBankFile} disabled={!bankEditable}><FileSpreadsheet size={14}/> Import HDFC statement</Button></>:<span className="tool-hint">Bank statements are uploaded by Accounts or Admin.</span>}</div>{bankRows.length ? <div className="table-wrap"><table><thead><tr><th>DEPOSIT DATE</th><th>NARRATION / REFERENCE</th><th>MODE</th><th>DEPOSIT</th><th>MATCH TO INVOICE</th></tr></thead><tbody>{bankRows.map((r,i)=><tr key={i}><td>{shortDate(r.date)}</td><td><strong>{r.narration || 'Bank deposit'}</strong><small className="sub-cell">{r.reference || 'No reference'}</small></td><td><span className="method-chip">{r.mode || '—'}</span></td><td className="mono">{money(r.depositAmount)}</td><td>{role==='admin'?<select className="inline-select" value={r.matchedInvoiceNumber || ''} disabled={!batchEditable} onChange={e=>{if(e.target.value)matchInvoice(e.target.value,i);else {const rows=[...bankRows];rows[i]={...r,matchedInvoiceNumber:''};update({...active,bankRows:rows});}}}><option value="">Select invoice</option>{tx.map(t=><option key={t.invoiceNumber} value={t.invoiceNumber}>{t.invoiceNumber}</option>)}</select>:<span className="mono">{r.matchedInvoiceNumber||'—'}</span>}</td></tr>)}</tbody></table></div>:<TableEmpty text="Add bank statement rows to review deposits against invoice payment allocations."/>}</>}
@@ -433,7 +388,7 @@ function Reconciliation({ state, canEdit, role, save, saveBank, upload, deleteDa
           :<Button kind="primary" disabled={!batchEditable||denomTotal!==expectedCash||!uploaded} onClick={submitCash}><CheckCircle2 size={15}/> Submit cash batch</Button>}</div></div>}
     </Panel>
     {role==='admin'&&<ChangeLog entries={arr(active.editLog) as any}/>}
-    </>:<div className="b2c-empty"><strong>No B2C for {reconciliationLabel(dayKey)}</strong><p>{canEdit?'Import a Vastra workbook for this day. The invoice date inside the file decides which day it is saved to, so you can upload any date from here.':role==='accounts'?'Billing uploads the Vastra file for each day. Once it is there you can upload its HDFC statement.':'Nothing has been uploaded for this date.'}</p>{canEdit&&<Button kind="primary" onClick={importFile} disabled={busy}><FileSpreadsheet size={15}/> Import Vastra workbook</Button>}</div>}
+    </>:<div className="b2c-empty"><strong>No B2C for {reconciliationLabel(dayKey)}</strong><p>{canEdit?'Upload a Vastra sales invoice or sales return Excel. The date inside the file decides which day it is saved to, so you can upload any date from here.':role==='accounts'?'Billing uploads the Vastra file for each day. Once it is there you can upload its HDFC statement.':'Nothing has been uploaded for this date.'}</p>{canEdit&&<Button kind="primary" onClick={importFile} disabled={busy}><FileSpreadsheet size={15}/> Upload Excel</Button>}</div>}
     <div className="recon-footnote"><ShieldCheck size={16}/><span>Every adjustment is recorded in the workspace. Tally export uses the active batch only.</span><StatusPill tone="gold">{canEdit||canBank?'Editing enabled':'Read only'}</StatusPill></div>
   </div>;
 }
