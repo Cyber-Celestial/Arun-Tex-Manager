@@ -511,6 +511,8 @@ async function writeModule(
   if (module === "dispatch") {
     const [current] = await db.select({ dispatch: operationsStateTable.dispatch })
       .from(operationsStateTable).where(eq(operationsStateTable.id, "main")).limit(1);
+    if (isObject(current?.dispatch) && current.dispatch.deletions !== undefined) data.deletions = current.dispatch.deletions;
+    else delete data.deletions;
     const error = validateDispatchState(data, isObject(current?.dispatch) ? current.dispatch : undefined);
     if (error) {
       res.status(400).json({ error });
