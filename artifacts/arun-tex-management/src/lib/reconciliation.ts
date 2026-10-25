@@ -30,3 +30,23 @@ export function onlinePaymentCounts(transactions: Record<string, any>[]) {
   const online = transactions.filter(row => row.type !== 'Return' && (Number(row.upiAmount) > 0 || Number(row.cardAmount) > 0));
   return { verified: online.filter(row => row.bankVerified === true).length, total: online.length };
 }
+
+export const invoiceKey = (value: unknown): string => String(value ?? '').trim().toUpperCase();
+
+/**
+ * Vastra repeats an invoice on one line per item. Reconciliation keeps one entry
+ * per invoice number, taking the first line; differing totals are reported.
+ */
+export function oneEntryPerInvoice<T extends Record<string, any>>(lines: T[]) {
+  const first = new Map<string, T>();
+  const conflicts = new Set<string>();
+  let merged = 0;
+  for (const line of lines) {
+    const key = invoiceKey(line.invoiceNumber);
+    const kept = first.get(key);
+    if (!kept) { first.set(key, line); continue; }
+    merged++;
+    if (Number(kept.totalInvoiceAmount) !== Number(line.totalInvoiceAmount)) conflicts.add(String(kept.invoiceNumber));
+  }
+  return { rows: [...first.values()], merged, conflicts: [...conflicts] };
+}

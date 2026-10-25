@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { batchStage, emptyReconciliation, onlinePaymentCounts, reconciliationLabel, reconciliationUploaded } from './reconciliation';
+import { batchStage, emptyReconciliation, onlinePaymentCounts, oneEntryPerInvoice, reconciliationLabel, reconciliationUploaded } from './reconciliation';
 
 test('new dated batches are empty, independently identified and not uploaded', () => {
   const first=emptyReconciliation('2024-02-29'),second=emptyReconciliation('2024-02-29');
@@ -27,4 +27,18 @@ test('batch stage follows submit, approval and lock', () => {
 test('online payment counts ignore cash and returns', () => {
   const rows=[{upiAmount:5,bankVerified:true},{cardAmount:7,bankVerified:false},{cashAmount:9},{type:'Return',upiAmount:3}];
   assert.deepEqual(onlinePaymentCounts(rows),{verified:1,total:2});
+});
+
+test('item lines of one invoice collapse to the first line; returns follow the same rule', () => {
+  const lines=[{invoiceNumber:'INV-1',totalInvoiceAmount:500},{invoiceNumber:'INV-1',totalInvoiceAmount:500},{invoiceNumber:' inv-1',totalInvoiceAmount:500},{invoiceNumber:'INV-2',totalInvoiceAmount:70},{invoiceNumber:'RET-1',totalInvoiceAmount:20},{invoiceNumber:'RET-1',totalInvoiceAmount:20}];
+  const result=oneEntryPerInvoice(lines);
+  assert.deepEqual(result.rows.map(r=>r.invoiceNumber),['INV-1','INV-2','RET-1']);
+  assert.equal(result.merged,3);
+  assert.deepEqual(result.conflicts,[]);
+});
+test('lines of one invoice with different totals are reported, first line wins', () => {
+  const result=oneEntryPerInvoice([{invoiceNumber:'INV-9',totalInvoiceAmount:100},{invoiceNumber:'INV-9',totalInvoiceAmount:40}]);
+  assert.equal(result.rows.length,1);
+  assert.equal(result.rows[0].totalInvoiceAmount,100);
+  assert.deepEqual(result.conflicts,['INV-9']);
 });
