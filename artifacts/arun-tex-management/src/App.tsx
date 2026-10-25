@@ -279,31 +279,26 @@ export function Overview({ state }: { state: WorkspaceState }) {
 
 function Reconciliation({ state, canEdit, role, save, saveBank }: { state: AnyObj; canEdit: boolean; role: Role; save: (data: AnyObj)=>Promise<unknown>; saveBank: (data: AnyObj)=>Promise<unknown> }) {
   const canBank = role==='admin'||role==='accounts';
-  const [selected, setSelected] = useState(() => {
-    const requested = new URLSearchParams(window.location.search).get('date');
-    const index = arr(state.batches).findIndex(batch => businessDate(batch.date) === requested);
-    return Math.max(0, index);
-  });
+  const batches = arr(state.batches);
+  const [dayKey, setDayKey] = useState(() => businessDate(new URLSearchParams(window.location.search).get('date')) ||
+    batches.map(batch=>businessDate(batch.date)).filter(Boolean).sort().at(-1) || localDateKey());
   const [tab, setTab] = useState('Transactions');
-  const [newBatchDate, setNewBatchDate] = useState(() =>
-    businessDate(new URLSearchParams(window.location.search).get('date')) ||
-    businessDate(arr(state.batches)[0]?.date) || localDateKey());
   const [importMessage, setImportMessage] = useState('');
   const [saveError, setSaveError] = useState('');
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
-  const [pendingImport, setPendingImport] = useState<{date:string;fileName:string;transactions:AnyObj[];merged?:number;conflicts?:string[]} | null>(null);
-  const batches = arr(state.batches); const active = batches[selected] || { date: newBatchDate, status: 'Open', transactions: [], bankRows: [], denominations: {} };
+  const [pendingReplace, setPendingReplace] = useState<{date:string;fileName:string;transactions:AnyObj[];merged:number;conflicts:string[];existing:number} | null>(null);
+  const selected = batches.findIndex(batch => businessDate(batch.date) === dayKey);
+  const hasBatch = selected >= 0;
+  const active = hasBatch ? batches[selected] : { date: dayKey, status: 'Open', transactions: [], bankRows: [], denominations: {} };
   const tx = arr(active.transactions); const bankRows = arr(active.bankRows);
-  const hasBatch = Boolean(batches[selected]);
   const uploaded = reconciliationUploaded(active);
   const duplicateDays = Array.from(new Set(batches.map(batch=>businessDate(batch.date)).filter((day,index,dates)=>day && dates.indexOf(day)!==index)));
-  const selectBatch = (index:number) => {
-    setSelected(index); setSaveError(''); setImportMessage('');
-    const day = businessDate(batches[index]?.date);
-    if(day)setNewBatchDate(day);
+  const dayList = batches.reduce<Record<string,B2cDaySummary>>((acc,batch)=>{const day=businessDate(batch.date);if(day&&!acc[day])acc[day]={count:arr(batch.transactions).length,stage:batchStage(batch).label};return acc;},{});
+  const selectDay = (day:string) => {
+    setDayKey(day); setSaveError(''); setImportMessage(''); setPendingReplace(null);
     const url = new URL(window.location.href);
-    if (day) url.searchParams.set('date',day);
+    url.searchParams.set('date',day);
     window.history.replaceState(window.history.state,'',`${url.pathname}${url.search}${url.hash}`);
   };
   const runAction = async (action:()=>Promise<unknown>, success?:string, allowed=canEdit) => {
@@ -314,32 +309,14 @@ function Reconciliation({ state, canEdit, role, save, saveBank }: { state: AnyOb
     finally { busyRef.current=false; setBusy(false); }
   };
   const update = (next: AnyObj) => runAction(()=>save({ ...state, batches: batches.map((b,i)=>i===selected ? next : b) }));
-  const addBatch = async () => {
-    const day=businessDate(newBatchDate);
-    if(!day){setSaveError('Choose a valid reconciliation date.');return;}
-    const index=batches.findIndex(batch=>businessDate(batch.date)===day);
-    if(index>=0){selectBatch(index);setImportMessage(`A reconciliation already exists for ${reconciliationLabel(day)}. Opened the existing reconciliation; no duplicate was created.`);return;}
-    const next=emptyReconciliation(day);
-    if(await runAction(()=>save({...state,batches:[...batches,next]}),`Reconciliation created for ${reconciliationLabel(day)}. You can now upload its invoice workbook.`)){
-      setSelected(batches.length);
-      const url=new URL(window.location.href);url.searchParams.set('date',day);
-      window.history.replaceState(window.history.state,'',`${url.pathname}${url.search}${url.hash}`);
-    }
-  };
-  const saveInvoiceImport = async (draft:{date:string;fileName:string;transactions:AnyObj[];merged?:number;conflicts?:string[]}) => {
-    const index=batches.findIndex(batch=>businessDate(batch.date)===draft.date);
-    if(index<0)throw new Error('Open or create this reconciliation date before retrying.');
-    if(batches.some(batch=>businessDate(batch.date)===draft.date&&reconciliationUploaded(batch)))
-      throw new Error(`Reconciliation for ${reconciliationLabel(draft.date)} has already been uploaded. Open the existing reconciliation; a second upload is not allowed.`);
-    const next={...batches[index],transactions:draft.transactions,invoiceImport:{fileName:draft.fileName}};
-    await save({...state,batches:batches.map((batch,i)=>i===index?next:batch)});
-    setPendingImport(null);setSelected(index);
-    setImportMessage(`${draft.transactions.length} invoices and returns saved for ${reconciliationLabel(draft.date)}.${draft.merged?` ${draft.merged} extra item lines were merged into one entry per invoice number.`:''}${draft.conflicts?.length?` Check the net amount of ${draft.conflicts.join(', ')}: its lines disagreed, the first line was used.`:''} Review split allocations before submitting.`);
-  };
   const importFile = () => document.getElementById('sales-import')?.click();
-  const handleImport = (file?: File) => { if (!file || !hasBatch || active.status==='Submitted') return;
-    if(uploaded){setSaveError(`Reconciliation for ${reconciliationLabel(active.date)} has already been uploaded.`);return;}
-    setImportMessage('Reading invoice workbook…'); void runAction(async () => {
+  const uploadDay = async (draft:{date:string;fileName:string;transactions:AnyObj[];merged:number;conflicts:string[]}, replace:boolean) => {
+    await upload({date:draft.date,fileName:draft.fileName,replace,transactions:draft.transactions});
+    selectDay(draft.date);
+    setImportMessage(`${draft.transactions.length} invoices ${replace?'replaced':'saved'} for ${reconciliationLabel(draft.date)}.${draft.merged?` ${draft.merged} extra item lines were merged into one entry per invoice number.`:''}${draft.conflicts.length?` Check the net amount of ${draft.conflicts.join(', ')}: its lines disagreed, the first line was used.`:''} Review split allocations before submitting.`);
+  };
+  const handleImport = (file?: File) => { if (!file || !canEdit) return;
+    setImportMessage('Reading invoice workbook…'); setPendingReplace(null); void runAction(async () => {
       let workbook:XLSX.WorkBook;
       try { workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true }); }
       catch { throw new Error('Could not read that workbook. Use an XLSX, XLS or CSV export. No invoice rows were saved.'); }
@@ -373,12 +350,23 @@ function Reconciliation({ state, canEdit, role, save, saveBank }: { state: AnyOb
       }
       if (!imported.length) throw new Error('No invoice rows found. Check that the workbook has Invoice Number, Invoice Date and Invoice Net Amount columns. No invoice rows were saved.');
       const single=oneEntryPerInvoice(imported);
-      const taken=new Set(batches.flatMap(batch=>arr(batch.transactions)).map(row=>invoiceKey(row.invoiceNumber)));
-      const repeated=single.rows.filter(row=>taken.has(invoiceKey(row.invoiceNumber))).map(row=>row.invoiceNumber);
-      if (repeated.length) throw new Error(`Already recorded in a reconciliation: ${repeated.slice(0,5).join(', ')}${repeated.length>5?` and ${repeated.length-5} more`:''}. Each invoice number can appear only once. No invoice rows were saved.`);
-      const draft={date:businessDate(active.date),fileName:file.name,transactions:single.rows,merged:single.merged,conflicts:single.conflicts};
-      setPendingImport(draft);
-      await saveInvoiceImport(draft);
+      const days=Array.from(new Set(single.rows.map(row=>businessDate(row.date))));
+      if (days.some(day=>!day)) throw new Error('Every invoice needs a valid Invoice Date. No invoice rows were saved.');
+      if (days.length!==1) throw new Error(`This file has invoices for ${days.length} dates (${days.slice(0,4).map(reconciliationLabel).join(', ')}${days.length>4?', …':''}). Upload one day at a time. No invoice rows were saved.`);
+      const day=days[0];
+      const index=batches.findIndex(batch=>businessDate(batch.date)===day);
+      const existing=index>=0?batches[index]:undefined;
+      const taken=new Map(batches.flatMap((batch,i)=>i===index?[]:arr(batch.transactions).map(row=>[invoiceKey(row.invoiceNumber),businessDate(batch.date)] as const)));
+      const repeated=single.rows.filter(row=>taken.has(invoiceKey(row.invoiceNumber)));
+      if (repeated.length) throw new Error(`Already recorded in B2C for ${reconciliationLabel(taken.get(invoiceKey(repeated[0].invoiceNumber)))}: ${repeated.slice(0,5).map(row=>row.invoiceNumber).join(', ')}${repeated.length>5?` and ${repeated.length-5} more`:''}. Each invoice number can appear only once. No invoice rows were saved.`);
+      const draft={date:day,fileName:file.name,transactions:single.rows,merged:single.merged,conflicts:single.conflicts};
+      if (existing&&reconciliationUploaded(existing)) {
+        if (existing.status==='Submitted') throw new Error(`B2C for ${reconciliationLabel(day)} is locked. An Admin can delete the day first, then upload again.`);
+        if (existing.billingSubmitted&&role!=='admin') throw new Error('The cash batch is submitted. Ask an Admin to replace this day.');
+        selectDay(day); setPendingReplace({...draft,existing:arr(existing.transactions).length});
+        return;
+      }
+      await uploadDay(draft,false);
     }); };
   const importBankFile = () => document.getElementById('bank-import')?.click();
   const handleBankImport = (file?:File) => { if(!file || !canBank || !hasBatch || active.status==='Submitted')return; setImportMessage('Reading bank statement…'); void runAction(async()=>{
