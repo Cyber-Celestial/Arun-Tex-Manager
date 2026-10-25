@@ -396,7 +396,7 @@ function Dispatch({ state, canEdit, save }: { state: AnyObj; canEdit: boolean; s
     const next=editing===-1?[...invoices,{status:'Pending',eInvoiceDone:false,eWayDone:false,bundleDone:false,whatsappSent:false,courierSent:false,vastraCourierUpdated:false,...record}]:invoices.map((v,i)=>i===editing?{...v,...record,status:'Pending'}:v);
     await save({...state,invoices:next});setEditing(null);
   };
-  const visible: Array<AnyObj & {_idx:number}>=invoices.map((v,i)=>({...v,_idx:i} as AnyObj & {_idx:number})).filter(v=>(filter==='All'||v.status===filter)&&`${v.invoiceNumber} ${v.customerName}`.toLowerCase().includes(search.toLowerCase())).sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))||String(b.invoiceNumber||'').localeCompare(String(a.invoiceNumber||''),undefined,{numeric:true}));
+  const visible: Array<AnyObj & {_idx:number}>=invoices.map((v,i)=>({...v,_idx:i} as AnyObj & {_idx:number})).filter(v=>(filter==='All'||v.status===filter)&&`${v.invoiceNumber} ${v.customerName}`.toLowerCase().includes(search.toLowerCase())).sort((a,b)=>String(a.date||'').localeCompare(String(b.date||''))||String(a.invoiceNumber||'').localeCompare(String(b.invoiceNumber||''),undefined,{numeric:true}));
   const printLabels=()=>window.print();
   return <div className="page-stack">
     <PageIntro eyebrow="B2B · DISPATCH DESK" title="Dispatch, without the loose ends." description="Make each compliance step visible before a bundle leaves the floor." actions={<><Button onClick={()=>setEditing(-1)} disabled={!canEdit||editing!==null}>+ Add B2B invoice</Button><Button kind="primary" onClick={printLabels}><Printer size={15}/> Print labels</Button></>}/>
