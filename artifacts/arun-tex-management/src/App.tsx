@@ -7,8 +7,8 @@ import * as XLSX from 'xlsx';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { DispatchInvoiceForm } from '@/components/dispatch-invoice-form';
 import { DispatchRecord } from '@/components/dispatch-record';
-import { PulseDateNavigation } from '@/components/pulse-date-navigation';
-import { businessDate, localDateKey, pulseTransactions, summarizePulse, type PulseMode } from '@/lib/pulse-data';
+import { OverviewDayPicker } from '@/components/overview-day-picker';
+import { businessDate, localDateKey, pulseTransactions, summarizePulse } from '@/lib/pulse-data';
 import { emptyReconciliation, reconciliationLabel, reconciliationUploaded } from '@/lib/reconciliation';
 import { ReconciliationNumberInput } from '@/components/reconciliation-number-input';
 import '@/components/reconciliation-date.css';
@@ -233,54 +233,40 @@ function useWorkspace() {
 function LoadingView() { return <div className="loading-view"><div className="skeleton skeleton-title"/><div className="skeleton-row">{[1,2,3,4].map(i=><div className="skeleton skeleton-card" key={i}/>)}</div><div className="skeleton skeleton-table"/></div>; }
 function LoadError({ retry }: { retry: () => void }) { return <div className="error-state"><CircleAlert size={24}/><h2>Workspace data did not load</h2><p>Check the connection, then try again. No changes have been made.</p><div className="error-actions"><Button kind="primary" onClick={retry}>Try again</Button><Link href="/sign-in" className="text-link">Sign in to workspace</Link></div></div>; }
 function AccessDenied() { return <div className="error-state"><ShieldCheck size={24}/><h2>This area is outside your role</h2><p>Your workspace role does not include access to this operations area.</p><Link href="/" className="text-link">Return to overview <ArrowRight size={14}/></Link></div>; }
-function PageIntro({ eyebrow, title, description, actions }: { eyebrow: string; title: string; description: string; actions?: ReactNode }) {
+function PageIntro({ eyebrow, title, description, actions }: { eyebrow: ReactNode; title: string; description: string; actions?: ReactNode }) {
   return <div className="page-intro"><div><div className="eyebrow">{eyebrow}</div><h1 className="display">{title}</h1><p>{description}</p></div>{actions && <div className="intro-actions">{actions}</div>}</div>;
 }
 
 export function Overview({ state }: { state: WorkspaceState }) {
-  const [pulseDate, setPulseDate] = useState(() => localDateKey());
-  const [pulseMode, setPulseMode] = useState<PulseMode>('day');
+  const todayKey = localDateKey();
+  const [selectedDay, setSelectedDay] = useState(todayKey);
   const b2c = state.b2c as AnyObj; const ds = state.dispatch as AnyObj; const hr = state.hr as AnyObj;
   const batches = arr(b2c.batches); const tx = batches.flatMap(b => arr(b.transactions)); const invoices = arr(ds.invoices);
   const employees = arr(hr.employees); const exceptions = arr(hr.attendance);
-  const todayKey = localDateKey();
-  const todayTx = tx.filter(t=>String(t.date||'').slice(0,10)===todayKey);
-  const cash = todayTx.reduce((n,t)=>n+Number(t.cashAmount||0),0); const sales = todayTx.filter(t=>t.type !== 'Return').reduce((n,t)=>n+Number(t.totalInvoiceAmount||0),0);
   const datedTransactions = pulseTransactions(batches);
-  const pulse = summarizePulse(datedTransactions, pulseDate, pulseMode);
-  const selectedDate = new Date(`${pulseDate}T12:00:00`);
-  const periodLabel = selectedDate.toLocaleDateString('en-IN', pulseMode === 'month'
-    ? { month: 'long', year: 'numeric' } : { day: '2-digit', month: 'short', year: 'numeric' });
-  const selectedMix = [{name:'Cash',amount:pulse.cash,color:'mix-cash'},
-    {name:'UPI',amount:pulse.upi,color:'mix-upi'}, {name:'Card',amount:pulse.card,color:'mix-card'}];
-  const selectedMixTotal = selectedMix.reduce((sum,item)=>sum+Math.max(0,item.amount),0);
-  const unmatched = todayTx.filter(t => !t.bankVerified && ['UPI','CARD','SPLIT'].includes(t.paymentMode)).length;
+  const day = summarizePulse(datedTransactions, selectedDay, 'day');
+  const dayTransactions = datedTransactions.filter(row => row.date === selectedDay);
+  const viewingToday = selectedDay === todayKey;
+  const dayName = new Date(`${selectedDay}T12:00:00`).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  const unmatched = dayTransactions.filter(t => !t.bankVerified && ['UPI','CARD','SPLIT'].includes(String(t.paymentMode))).length;
   const pendingDispatch = invoices.filter(i => i.status !== 'Completed').length;
   const pendingPeople = exceptions.length;
   return <div className="page-stack">
-    <PageIntro eyebrow={`${new Date().toLocaleDateString('en-IN',{weekday:'long',day:'2-digit',month:'long',year:'numeric'}).toUpperCase()} · DAY CLOSE`} title="Good morning, team." description="Your operations room is ready. Here’s where today stands across sales, dispatch and people." actions={<><StatusPill tone="good">Workspace healthy</StatusPill><Button kind="secondary" onClick={() => window.print()}><FileDown size={15}/> Day-end summary</Button></>}/>
+    <PageIntro eyebrow={<OverviewDayPicker value={selectedDay} today={todayKey} recordDates={datedTransactions.map(row => row.date)} onChange={setSelectedDay}/>} title="Good morning, team." description={viewingToday ? 'Your operations room is ready. Here’s where today stands across sales, dispatch and people.' : `Viewing ${dayName}. Sales figures are for that day; dispatch and people show the current position.`} actions={<>{!viewingToday && <Button kind="primary" onClick={() => setSelectedDay(todayKey)}>Back to today</Button>}<StatusPill tone="good">Workspace healthy</StatusPill><Button kind="secondary" onClick={() => window.print()}><FileDown size={15}/> Day-end summary</Button></>}/>
     <div className="metric-grid">
-      <Metric label="B2C sales today" value={money(sales)} note={`${todayTx.length} invoices · Vastra channel`} icon={ArrowUpRight} color="teal"/>
-      <Metric label="Cash to reconcile" value={money(cash)} note="Denominations pending close" icon={Banknote} color="gold"/>
+      <Metric label={viewingToday ? 'B2C sales today' : 'B2C sales'} value={money(day.sales)} note={`${day.count} invoices · Vastra channel`} icon={ArrowUpRight} color="teal"/>
+      <Metric label="Cash to reconcile" value={money(day.cash)} note="Denominations pending close" icon={Banknote} color="gold"/>
       <Metric label="B2B dispatches" value={`${invoices.length - pendingDispatch} / ${invoices.length}`} note={`${pendingDispatch} need attention`} icon={PackageCheck} color="blue"/>
       <Metric label="People exceptions" value={`${pendingPeople}`} note={`${employees.length} active employees`} icon={Users} color="rose"/>
     </div>
-    <div className="overview-grid">
-      <Panel className="activity-panel"><PanelHeading kicker="BROWSE DAY CLOSES" title="Close-out pulse" action={<span className="mono faint">{periodLabel.toUpperCase()}</span>}/>
-        <PulseDateNavigation value={pulseDate} onChange={setPulseDate} mode={pulseMode} onModeChange={setPulseMode} availableDates={datedTransactions.map(row=>row.date).filter(Boolean)} today={todayKey}/>
-        <div className="pulse-total"><div><span>{pulseMode==='month'?'Monthly':'Daily'} recorded invoice value</span><strong className="mono">{money(pulse.sales)}</strong></div><div className="pulse-mark"><Activity size={19}/></div></div>
-        <p className="pulse-period-note" role="status">{pulse.count ? `${pulse.count} invoice / return records · ${periodLabel}` : `No invoice records for this ${pulseMode}. Showing ₹0.`}</p>
-        <div className="mix-heading"><span>COLLECTION BY PAYMENT MODE</span><span>FROM INVOICE ALLOCATION</span></div><div className="payment-mix">{selectedMix.map(item=><div className="mix-row" key={item.name}><div className="mix-label"><span><i className={item.color}/>{item.name}</span><strong className="mono">{money(item.amount)}</strong></div><div className="mix-track"><i className={item.color} style={{width:`${selectedMixTotal?Math.max(0,item.amount)/selectedMixTotal*100:0}%`}}/></div></div>)}</div><div className="chart-legend"><span><i/> {pulseMode==='month'?'MONTHLY':'DAILY'} ALLOCATIONS</span><span>Based on invoice payment records</span></div>
-      </Panel>
-      <Panel className="close-panel"><PanelHeading kicker="THE NEXT RIGHT THING" title="Needs your attention"/>
-        <div className="attention-list">
-          <Link href="/reconciliation" className="attention-item"><span className="attention-icon coral"><FileSpreadsheet size={17}/></span><span className="attention-copy"><strong>Bank matches to review</strong><small>{unmatched} invoices awaiting a bank match</small></span><span className={`attention-count ${unmatched ? 'count-warn' : ''}`}>{unmatched}</span><ArrowRight size={16}/></Link>
-          <Link href="/dispatch" className="attention-item"><span className="attention-icon amber"><PackageCheck size={17}/></span><span className="attention-copy"><strong>B2B dispatch checklist</strong><small>{pendingDispatch} invoices still in progress</small></span><span className={`attention-count ${pendingDispatch ? 'count-warn' : ''}`}>{pendingDispatch}</span><ArrowRight size={16}/></Link>
-          <Link href="/people" className="attention-item"><span className="attention-icon lavender"><Clock3 size={17}/></span><span className="attention-copy"><strong>Attendance exceptions</strong><small>Review employee notes for this period</small></span><span className="attention-count">{pendingPeople}</span><ArrowRight size={16}/></Link>
-        </div>
-        <div className="assurance"><ShieldCheck size={16}/><span>Changes are saved to the workspace as you go.</span></div>
-      </Panel>
-    </div>
+    <Panel className="close-panel"><PanelHeading kicker="THE NEXT RIGHT THING" title="Needs your attention"/>
+      <div className="attention-list">
+        <Link href="/reconciliation" className="attention-item"><span className="attention-icon coral"><FileSpreadsheet size={17}/></span><span className="attention-copy"><strong>Bank matches to review</strong><small>{unmatched} invoices awaiting a bank match</small></span><span className={`attention-count ${unmatched ? 'count-warn' : ''}`}>{unmatched}</span><ArrowRight size={16}/></Link>
+        <Link href="/dispatch" className="attention-item"><span className="attention-icon amber"><PackageCheck size={17}/></span><span className="attention-copy"><strong>B2B dispatch checklist</strong><small>{pendingDispatch} invoices still in progress</small></span><span className={`attention-count ${pendingDispatch ? 'count-warn' : ''}`}>{pendingDispatch}</span><ArrowRight size={16}/></Link>
+        <Link href="/people" className="attention-item"><span className="attention-icon lavender"><Clock3 size={17}/></span><span className="attention-copy"><strong>Attendance exceptions</strong><small>Review employee notes for this period</small></span><span className="attention-count">{pendingPeople}</span><ArrowRight size={16}/></Link>
+      </div>
+      <div className="assurance"><ShieldCheck size={16}/><span>Changes are saved to the workspace as you go.</span></div>
+    </Panel>
     <Panel><PanelHeading kicker="RECENT WORK" title="Latest B2C invoices" action={<Link href="/reconciliation" className="text-link">Open reconciliation <ArrowRight size={14}/></Link>}/>
       {tx.length ? <div className="table-wrap"><table><thead><tr><th>INVOICE</th><th>DATE</th><th>PAYMENT</th><th>BANK MATCH</th><th className="align-right">VALUE</th></tr></thead><tbody>{tx.slice(0,5).map((t,i)=><tr key={t.invoiceNumber ?? i}><td className="strong">{t.invoiceNumber || 'Invoice record'}</td><td>{shortDate(t.date)}</td><td><span className="method-chip">{t.paymentMode || '—'}</span></td><td><StatusPill tone={t.bankVerified ? 'good' : 'warn'}>{t.bankVerified ? 'Matched' : 'Review'}</StatusPill></td><td className="align-right mono">{money(t.totalInvoiceAmount)}</td></tr>)}</tbody></table></div> : <TableEmpty text="Imported sales will appear here once today’s Vastra batch is added."/>}
     </Panel>
