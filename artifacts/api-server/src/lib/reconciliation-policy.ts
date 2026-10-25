@@ -30,6 +30,29 @@ function sourceRows(batch: RecordValue): string[] {
     : JSON.stringify(row)).sort();
 }
 
+const invoiceKey = (value: unknown) => String(value ?? '').trim().toUpperCase();
+
+function invoiceCounts(batches: unknown[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const batch of batches) {
+    if (!object(batch)) continue;
+    for (const row of rows(batch)) {
+      const key = object(row) ? invoiceKey(row.invoiceNumber) : '';
+      if (key) counts.set(key, (counts.get(key) || 0) + 1);
+    }
+  }
+  return counts;
+}
+
+/** An invoice or return number may appear once; legacy repeats may stay but cannot grow. */
+function newDuplicateInvoice(before: unknown[], after: unknown[]): string | null {
+  const old = invoiceCounts(before);
+  for (const [key, count] of invoiceCounts(after)) {
+    if (count > Math.max(1, old.get(key) || 0)) return key;
+  }
+  return null;
+}
+
 /**
  * Validate against the persisted state before stamping a first successful import.
  * Legacy duplicates may remain, but cannot increase or gain a second upload.
@@ -82,6 +105,8 @@ export function validateReconciliationChange(next: RecordValue, previous: Record
     if (count > Math.max(1, uploadedBefore.get(day) || 0))
       return `Reconciliation for ${day} has already been uploaded. A second invoice upload is not allowed.`;
   }
+  const duplicate = newDuplicateInvoice(before, after);
+  if (duplicate) return `Invoice number ${duplicate} is already recorded. Each invoice or return number can appear only once.`;
   // Only stamp after every check succeeds. The conditional DB write makes the
   // source rows and this server-owned receipt one atomic state change.
   after.forEach((batch, index) => {

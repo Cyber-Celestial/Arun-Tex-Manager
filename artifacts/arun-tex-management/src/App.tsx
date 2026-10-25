@@ -9,7 +9,7 @@ import { DispatchInvoiceForm } from '@/components/dispatch-invoice-form';
 import { DispatchRecord } from '@/components/dispatch-record';
 import { PulseDateNavigation } from '@/components/pulse-date-navigation';
 import { businessDate, localDateKey, pulseTransactions, summarizePulse, type PulseMode } from '@/lib/pulse-data';
-import { emptyReconciliation, reconciliationLabel, reconciliationUploaded } from '@/lib/reconciliation';
+import { emptyReconciliation, invoiceKey, oneEntryPerInvoice, reconciliationLabel, reconciliationUploaded } from '@/lib/reconciliation';
 import { ReconciliationNumberInput } from '@/components/reconciliation-number-input';
 import '@/components/reconciliation-date.css';
 import { Toaster } from '@/components/ui/toaster';
@@ -301,7 +301,7 @@ function Reconciliation({ state, canEdit, role, save }: { state: AnyObj; canEdit
   const [saveError, setSaveError] = useState('');
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
-  const [pendingImport, setPendingImport] = useState<{date:string;fileName:string;transactions:AnyObj[]} | null>(null);
+  const [pendingImport, setPendingImport] = useState<{date:string;fileName:string;transactions:AnyObj[];merged?:number;conflicts?:string[]} | null>(null);
   const batches = arr(state.batches); const active = batches[selected] || { date: newBatchDate, status: 'Open', transactions: [], bankRows: [], denominations: {} };
   const tx = arr(active.transactions); const bankRows = arr(active.bankRows);
   const hasBatch = Boolean(batches[selected]);
@@ -345,7 +345,7 @@ function Reconciliation({ state, canEdit, role, save }: { state: AnyObj; canEdit
       window.history.replaceState(window.history.state,'',`${url.pathname}${url.search}${url.hash}`);
     }
   };
-  const saveInvoiceImport = async (draft:{date:string;fileName:string;transactions:AnyObj[]}) => {
+  const saveInvoiceImport = async (draft:{date:string;fileName:string;transactions:AnyObj[];merged?:number;conflicts?:string[]}) => {
     const index=batches.findIndex(batch=>businessDate(batch.date)===draft.date);
     if(index<0)throw new Error('Open or create this reconciliation date before retrying.');
     if(batches.some(batch=>businessDate(batch.date)===draft.date&&reconciliationUploaded(batch)))
@@ -353,7 +353,7 @@ function Reconciliation({ state, canEdit, role, save }: { state: AnyObj; canEdit
     const next={...batches[index],transactions:draft.transactions,invoiceImport:{fileName:draft.fileName}};
     await save({...state,batches:batches.map((batch,i)=>i===index?next:batch)});
     setPendingImport(null);setSelected(index);
-    setImportMessage(`${draft.transactions.length} invoice and return rows saved for ${reconciliationLabel(draft.date)}. Review split allocations before submitting.`);
+    setImportMessage(`${draft.transactions.length} invoices and returns saved for ${reconciliationLabel(draft.date)}.${draft.merged?` ${draft.merged} extra item lines were merged into one entry per invoice number.`:''}${draft.conflicts?.length?` Check the net amount of ${draft.conflicts.join(', ')}: its lines disagreed, the first line was used.`:''} Review split allocations before submitting.`);
   };
   const importFile = () => document.getElementById('sales-import')?.click();
   const handleImport = (file?: File) => { if (!file || !hasBatch || active.status==='Submitted') return;
@@ -391,7 +391,11 @@ function Reconciliation({ state, canEdit, role, save }: { state: AnyObj; canEdit
         }
       }
       if (!imported.length) throw new Error('No invoice rows found. Check that the workbook has Invoice Number, Invoice Date and Invoice Net Amount columns. No invoice rows were saved.');
-      const draft={date:businessDate(active.date),fileName:file.name,transactions:imported};
+      const single=oneEntryPerInvoice(imported);
+      const taken=new Set(batches.flatMap(batch=>arr(batch.transactions)).map(row=>invoiceKey(row.invoiceNumber)));
+      const repeated=single.rows.filter(row=>taken.has(invoiceKey(row.invoiceNumber))).map(row=>row.invoiceNumber);
+      if (repeated.length) throw new Error(`Already recorded in a reconciliation: ${repeated.slice(0,5).join(', ')}${repeated.length>5?` and ${repeated.length-5} more`:''}. Each invoice number can appear only once. No invoice rows were saved.`);
+      const draft={date:businessDate(active.date),fileName:file.name,transactions:single.rows,merged:single.merged,conflicts:single.conflicts};
       setPendingImport(draft);
       await saveInvoiceImport(draft);
     }); };
