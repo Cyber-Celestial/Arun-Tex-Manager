@@ -1,5 +1,5 @@
 import './reconciliation-workflow.css';
-import { onlinePaymentCounts } from '@/lib/reconciliation';
+import { onlinePaymentCounts, uploadSlot } from '@/lib/reconciliation';
 
 type Batch = Record<string, any>;
 type LogEntry = { at: string; name: string; role: string; action: string; changes?: string[] };
@@ -10,6 +10,8 @@ const actionLabel: Record<string, string> = {
   'approval-cleared': 'Approval cleared by an edit',
   lock: 'Batch locked and Tally export unlocked',
   edit: 'Admin edited the batch',
+  replace: 'An Excel file was replaced',
+  upload: 'An Excel file was added',
 };
 
 export function WorkflowSteps({ batch }: { batch: Batch }) {
@@ -35,4 +37,18 @@ export function ChangeLog({ entries }: { entries: LogEntry[] }) {
       {entry.changes?.length ? <ul className="change-log-changes">{entry.changes.map((change, j) => <li key={j}>{change}</li>)}</ul> : null}
     </li>)}</ul>
   </details>;
+}
+
+/** The two uploads a day can hold: one sales invoice file and one sales return file. */
+export function UploadSlots({ batch }: { batch: Batch }) {
+  const slots = [
+    { label: 'Sales invoices', unit: 'invoices', slot: uploadSlot(batch, 'invoice') },
+    { label: 'Sales returns', unit: 'returns', slot: uploadSlot(batch, 'return') },
+  ];
+  return <ul className="upload-slots" aria-label="Uploads for this day">
+    {slots.map(({ label, unit, slot }) => <li key={label} className={slot.done ? 'upload-slot-done' : ''}>
+      <i/><strong>{label}</strong>
+      <span>{slot.done ? `${slot.count} ${unit}${slot.fileName ? ` · ${slot.fileName}` : ''}` : 'not uploaded'}</span>
+    </li>)}
+  </ul>;
 }

@@ -98,7 +98,7 @@ export function applyBatchWorkflow(next: unknown[], previous: unknown[], actor: 
     if (old?.billingSubmitted === true && !wantsSubmit) return fail(400, 'A submitted cash batch cannot be withdrawn.');
     if (old?.adminApproved === true && !wantsApproval) return fail(400, 'An approved cash batch cannot be withdrawn.');
 
-    for (const key of ['billingSubmittedAt', 'billingSubmittedBy', 'adminApprovedAt', 'adminApprovedBy', 'lockedAt']) {
+    for (const key of ['billingSubmittedAt', 'billingSubmittedBy', 'adminApprovedAt', 'adminApprovedBy', 'lockedAt', 'returnImport']) {
       if (old && key in old) batch[key] = old[key]; else delete batch[key];
     }
     batch.status = old?.status ?? 'Open';

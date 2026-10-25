@@ -12,12 +12,15 @@ const input = (rows: unknown[], over: Record<string, unknown> = {}) => ({ date: 
 const ok = (r: any) => { assert.ok('data' in r, JSON.stringify(r)); return r; };
 const day = (over: Record<string, unknown> = {}) => ({ id: 'd1', date: '2026-10-24', status: 'Open', transactions: [row('OLD-1')], bankRows: [], denominations: { '500': 1 }, invoiceImport: { id: 'x', fileName: 'old.xlsx' }, editLog: [], ...over });
 
-test('rows are cleaned: only known fields, returns carry no payment split, online rows start unverified', () => {
-  const result = cleanUploadRows([row('A', '2026-10-24T00:00:00Z', { extra: 1, paymentMode: 'UPI', cashAmount: 0, upiAmount: 100 }), row('R1', '2026-10-24', { type: 'Return', paymentMode: 'RETURN', cashAmount: 5 })], '2026-10-24');
+test('rows are cleaned: only known fields, online rows start unverified, returns carry no payment split', () => {
+  const result = cleanUploadRows([row('A', '2026-10-24T00:00:00Z', { extra: 1, paymentMode: 'UPI', cashAmount: 0, upiAmount: 100 })], '2026-10-24');
   assert.ok('rows' in result);
   assert.deepEqual(result.rows[0], { invoiceNumber: 'A', date: '2026-10-24', totalInvoiceAmount: 100, type: 'Invoice', paymentMode: 'UPI', cashAmount: 0, upiAmount: 100, cardAmount: 0, bankVerified: false });
-  assert.equal(result.rows[1].cashAmount, 0);
-  assert.equal(result.rows[1].bankVerified, true);
+  const returned = cleanUploadRows([{ invoiceNumber: 'R1', date: '2026-10-24', totalInvoiceAmount: 40, type: 'Return', paymentMode: 'RETURN', cashAmount: 5 }], '2026-10-24', 'return');
+  assert.ok('rows' in returned);
+  assert.equal(returned.rows[0].cashAmount, 0);
+  assert.equal(returned.rows[0].bankVerified, true);
+  assert.equal(returned.rows[0].paymentMode, 'RETURN');
 });
 
 test('rows are refused for another date, repeated numbers, bad amounts or modes', () => {
@@ -84,4 +87,58 @@ test('deleting a day removes it, records the deletion and flags a locked day', (
   assert.deepEqual((r.data.deletions as any[])[0], { at: NOW, userId: 'a1', name: 'Arun', date: '2026-10-25', invoices: 2, locked: true });
   assert.deepEqual(removeB2cDay(b2c, '2026-10-01', { userId: 'a1', name: 'Arun' }, NOW), { error: 'There is no B2C on that date.' });
   assert.deepEqual(removeB2cDay(b2c, 'x', { userId: 'a1', name: 'Arun' }, NOW), { error: 'Choose a valid date to delete.' });
+});
+
+const ret = (n: string, date = '2026-10-24', over: Record<string, unknown> = {}) =>
+  ({ invoiceNumber: n, date, totalInvoiceAmount: 40, type: 'Return', paymentMode: 'RETURN', cashAmount: 0, upiAmount: 0, cardAmount: 0, bankVerified: true, ...over });
+const returns = (rows: unknown[], over: Record<string, unknown> = {}) => input(rows, { kind: 'return', fileName: 'returns.xlsx', ...over });
+
+test('a sales return file is the second upload of a day and keeps the invoices', () => {
+  const b2c = { batches: [day()] };
+  const r = ok(applyUpload(b2c, returns([ret('R1'), ret('R2')]), billing, NOW));
+  const next = r.data.batches[0];
+  assert.equal(r.replaced, false);
+  assert.deepEqual(next.transactions.map((t: any) => t.invoiceNumber), ['OLD-1', 'R1', 'R2']);
+  assert.equal(next.returnImport.fileName, 'returns.xlsx');
+  assert.equal(next.invoiceImport.fileName, 'old.xlsx');
+  assert.equal(next.editLog.at(-1).action, 'upload');
+  assert.match(next.editLog.at(-1).changes[0], /Added 2 returns from returns.xlsx/);
+});
+
+test('returns can start a day, and invoices can be added after them', () => {
+  const created = ok(applyUpload({ batches: [] }, returns([ret('R1')]), billing, NOW));
+  assert.equal(created.data.batches[0].returnImport.fileName, 'returns.xlsx');
+  assert.equal(created.data.batches[0].invoiceImport, undefined);
+  const both = ok(applyUpload(created.data, input([row('N1')]), billing, NOW));
+  assert.deepEqual(both.data.batches[0].transactions.map((t: any) => t.invoiceNumber), ['N1', 'R1']);
+  assert.ok(both.data.batches[0].invoiceImport && both.data.batches[0].returnImport);
+});
+
+test('each kind can be uploaded once; Replace swaps only that kind', () => {
+  const full = ok(applyUpload({ batches: [day()] }, returns([ret('R1')]), billing, NOW)).data;
+  assert.match((applyUpload(full, returns([ret('R9')]), billing, NOW) as any).error, /already has 1 returns.*Replace/);
+  const swappedReturns = ok(applyUpload(full, returns([ret('R9'), ret('R10')], { replace: true }), billing, NOW));
+  assert.deepEqual(swappedReturns.data.batches[0].transactions.map((t: any) => t.invoiceNumber), ['OLD-1', 'R9', 'R10']);
+  assert.equal(swappedReturns.replaced, true);
+  const swappedInvoices = ok(applyUpload(full, input([row('N1'), row('N2')], { replace: true }), billing, NOW));
+  assert.deepEqual(swappedInvoices.data.batches[0].transactions.map((t: any) => t.invoiceNumber), ['N1', 'N2', 'R1']);
+});
+
+test('a file must match the kind chosen, and numbers cannot repeat inside the day', () => {
+  assert.match((applyUpload({ batches: [] }, returns([row('A1')]), billing, NOW) as any).error, /is an invoice, but this upload is for returns/);
+  assert.match((applyUpload({ batches: [] }, input([ret('R1')]), billing, NOW) as any).error, /is a return, but this upload is for invoices/);
+  assert.match((applyUpload({ batches: [day()] }, returns([ret('old-1')]), billing, NOW) as any).error, /already recorded in B2C for 2026-10-24/);
+});
+
+test('a legacy day whose invoice file also held returns needs Replace for returns', () => {
+  const legacy = { batches: [day({ transactions: [row('OLD-1'), ret('OLD-R1')] })] };
+  assert.match((applyUpload(legacy, returns([ret('R1')]), billing, NOW) as any).error, /already has 1 returns/);
+});
+
+test('submitted and locked days refuse the second file like any other change', () => {
+  const submitted = { batches: [day({ billingSubmitted: true })] };
+  assert.equal((applyUpload(submitted, returns([ret('R1')]), billing, NOW) as any).status, 403);
+  const byAdmin = ok(applyUpload(submitted, returns([ret('R1')]), admin, NOW));
+  assert.equal(byAdmin.data.batches[0].billingSubmitted, false);
+  assert.match((applyUpload({ batches: [day({ status: 'Submitted' })] }, returns([ret('R1')]), admin, NOW) as any).error, /locked/);
 });

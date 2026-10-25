@@ -10,3 +10,10 @@
 .change-log strong { color:#34403c; }
 .change-log span, .change-log time { font-size:11px; color:#8a8f86; }
 .change-log-changes { margin:4px 0 0; padding-left:18px; color:#5d6862; font-size:11px; }
+.upload-slots { display:flex; flex-wrap:wrap; gap:8px 12px; margin:0; padding:0; list-style:none; }
+.upload-slots li { display:inline-flex; align-items:center; gap:8px; padding:7px 12px; border:1px dashed #d6cfbc; border-radius:9px; background:#fffdf8; font-size:12px; color:#8a8f86; }
+.upload-slots li i { width:8px; height:8px; border-radius:50%; border:1.5px solid #c8c6b8; }
+.upload-slots strong { font-weight:700; color:#5d6862; }
+.upload-slot-done { border-style:solid; border-color:#cfe0d3; background:#f2f7f1; color:#3f775b; }
+.upload-slot-done i { background:#4f876d; border-color:#4f876d; }
+.upload-slot-done strong { color:#2f6a50; }
