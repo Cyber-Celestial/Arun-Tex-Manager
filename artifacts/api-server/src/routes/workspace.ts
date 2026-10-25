@@ -25,9 +25,6 @@ import {
 import { and, eq, sql } from "drizzle-orm";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { isDeepStrictEqual } from "node:util";
-import { validateDispatchState } from "../lib/dispatch-validation";
-import { preparePayrollState } from "../lib/payroll-state";
-import { todayIndia } from "@workspace/payroll";
 
 const router: IRouter = Router();
 
@@ -137,12 +134,6 @@ async function ensureStateRow(): Promise<void> {
     .insert(operationsStateTable)
     .values({ id: "main", ...INITIAL_STATE })
     .onConflictDoNothing();
-  // Persist the start once, including for older workspaces, so an idle month
-  // remains available for accrual/confirmation rather than silently disappearing.
-  await db.update(operationsStateTable).set({
-    hr: sql`jsonb_set(${operationsStateTable.hr}, '{payrollStartMonth}', ${JSON.stringify(todayIndia().slice(0, 7))}::jsonb, true)`,
-    version: sql`${operationsStateTable.version} + 1`,
-  }).where(and(eq(operationsStateTable.id, "main"), sql`NOT (${operationsStateTable.hr} ? 'payrollStartMonth')`));
 }
 
 function cashDenominationTotal(denominations: unknown): number {
@@ -304,6 +295,34 @@ function validateB2cState(data: JsonObject): string | null {
   return null;
 }
 
+function validateDispatchState(data: JsonObject): string | null {
+  if (!Array.isArray(data.invoices)) {
+    return "Dispatch data must contain an invoices list.";
+  }
+  for (const value of data.invoices) {
+    if (!isObject(value)) return "A dispatch invoice is not valid.";
+    if (value.status !== "Completed") continue;
+    const ready =
+      value.eInvoiceDone === true &&
+      value.eWayDone === true &&
+      /^\d{12}$/.test(String(value.eWayBillNumber ?? "")) &&
+      value.bundleDone === true &&
+      typeof value.lrNumber === "string" &&
+      value.lrNumber.trim().length > 0 &&
+      typeof value.lrPdfObjectPath === "string" &&
+      value.lrPdfObjectPath.length > 0 &&
+      value.whatsappSent === true &&
+      value.courierSent === true &&
+      value.vastraCourierUpdated === true &&
+      typeof value.courierPdfObjectPath === "string" &&
+      value.courierPdfObjectPath.length > 0;
+    if (!ready) {
+      return "A dispatch invoice cannot be completed until every compliance step is done.";
+    }
+  }
+  return null;
+}
+
 function validateHrState(data: JsonObject): string | null {
   if (!Array.isArray(data.employees)) {
     return "HR data must contain an employees list.";
@@ -456,7 +475,7 @@ async function writeModule(
     res.status(400).json({ error: "Workspace data must be an object." });
     return;
   }
-  let data = requestData.data;
+  const data = requestData.data;
 
   if (module === "b2c") {
     matchOnlinePayments(data, user.role);
@@ -503,26 +522,6 @@ async function writeModule(
   }
 
   await ensureStateRow();
-  let attendanceHr: JsonObject | undefined;
-  if (module === "hr" || module === "attendance") {
-    const [current] = await db.select().from(operationsStateTable)
-      .where(eq(operationsStateTable.id, "main")).limit(1);
-    if (current.version !== requestData.expectedVersion) {
-      res.status(409).json({ error: "The workspace changed in another session. Refresh and try again." });
-      return;
-    }
-    try {
-      const previous = current.hr as JsonObject;
-      const prepared = preparePayrollState(previous,
-        module === "attendance" ? { ...previous, attendance: data.attendance } : data,
-        user.userId);
-      if (module === "attendance") attendanceHr = prepared;
-      data = prepared;
-    } catch (error) {
-      res.status(400).json({ error: error instanceof Error ? error.message : "Payroll data is not valid." });
-      return;
-    }
-  }
   if (module === "b2c") {
     const [current] = await db
       .select({ b2c: operationsStateTable.b2c })
@@ -556,7 +555,7 @@ async function writeModule(
       ? await db
           .update(operationsStateTable)
           .set({
-            hr: attendanceHr!,
+            hr: sql`jsonb_set(${operationsStateTable.hr}, '{attendance}', ${JSON.stringify(data.attendance)}::jsonb, true)`,
             version: sql`${operationsStateTable.version} + 1`,
           })
           .where(whereVersion)

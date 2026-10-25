@@ -2,12 +2,10 @@ import path from 'path';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
-import { prepareOcrAssets } from './build/ocr-assets';
 
 import runtimeErrorOverlay from '@replit/vite-plugin-runtime-error-modal';
 
 const rawPort = process.env.PORT;
-await prepareOcrAssets(import.meta.dirname);
 
 if (!rawPort) {
   throw new Error(

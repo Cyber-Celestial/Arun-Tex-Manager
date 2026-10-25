@@ -1,5 +1,3 @@
-/generated-artifacts/
-/artifacts/arun-tex-management/public/ocr/
 # The format of this file is identical to `.dockerignore`.
 # It is used to reduce the size of deployed images to make the process of publishing faster.
 
