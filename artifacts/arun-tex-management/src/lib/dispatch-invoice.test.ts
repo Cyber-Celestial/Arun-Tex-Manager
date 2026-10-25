@@ -76,3 +76,11 @@ test('completion requires valid IDs and every existing dispatch requirement', ()
     assert(!dispatchComplete({...invoice,[key]:false}), key);
   }
 });
+
+test('a courier tracking number uses the same LR number field for dispatch completion', () => {
+  const invoice = {...extractInvoice(text).fields, eInvoiceDone:true,eWayDone:true,bundleDone:true,
+    whatsappSent:true,courierSent:true,vastraCourierUpdated:true,lrNumber:'COURIER-TRACK-001',
+    lrPdfObjectPath:'/objects/uploads/test',courierPdfObjectPath:'/objects/uploads/test'};
+  assert(dispatchComplete(invoice));
+  assert(!dispatchComplete({...invoice,lrNumber:''}));
+});
