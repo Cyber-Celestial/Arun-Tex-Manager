@@ -21,3 +21,7 @@ timeoutMs = 20000
 
 [objectStorage]
 defaultBucketID = "replit-objstore-0bfe9203-516a-4823-90d6-a06cfb74b8b2"
+
+[nix]
+channel = "stable-25_05"
+packages = ["glib", "nss", "nspr", "atk", "at-spi2-atk", "cups", "dbus", "libdrm", "expat", "libxkbcommon", "pango", "cairo", "alsa-lib", "mesa", "xorg.libX11", "xorg.libXcomposite", "xorg.libXdamage", "xorg.libXext", "xorg.libXfixes", "xorg.libXrandr", "xorg.libxcb", "libgbm"]
