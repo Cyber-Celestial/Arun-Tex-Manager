@@ -26,6 +26,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { isDeepStrictEqual } from "node:util";
 import { validateDispatchState } from "../lib/dispatch-validation";
+import { validateReconciliationChange } from "../lib/reconciliation-policy";
 
 const router: IRouter = Router();
 
@@ -515,6 +516,11 @@ async function writeModule(
         ? current.b2c.batches
         : [];
     const nextBatches = Array.isArray(data.batches) ? data.batches : [];
+    const importError = validateReconciliationChange(data, isObject(current?.b2c) ? current.b2c : {});
+    if (importError) {
+      res.status(409).json({ error: importError });
+      return;
+    }
     const changedFinalizedBatch = currentBatches.some(
       (batch, index) =>
         isObject(batch) &&

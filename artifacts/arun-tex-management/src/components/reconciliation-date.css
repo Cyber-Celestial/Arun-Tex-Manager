@@ -1,0 +1,7 @@
+.recon-date-create { display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding:14px; border:1px solid #e2dfd3; border-radius:8px; background:#fffdf8; }
+.recon-date-create label { color:#70776e; font:600 9px var(--app-font-mono); letter-spacing:.08em; }
+.recon-date-create input { border:1px solid #dedacd; border-radius:5px; background:#fffdf8; color:#34423e; padding:8px 10px; font-size:12px; min-width:0; }
+.recon-date-create small { font-size:10px; color:#7c8178; }
+.recon-error { display:flex; align-items:center; flex-wrap:wrap; gap:12px; padding:13px 16px; border:1px solid #e2c7ae; background:#fff6eb; border-radius:8px; color:#81552f; font-size:12px; }
+.recon-date-create input:focus-visible { outline:2px solid #246451; outline-offset:2px; }
+@media (max-width:640px) { .recon-date-create { align-items:stretch; } .recon-date-create label,.recon-date-create small { flex-basis:100%; } .recon-date-create input { flex:1 1 130px; } .recon-date-create .btn { flex:1 1 180px; } .recon-toolbar .batch-switch { flex-wrap:wrap; max-width:100%; } .recon-toolbar .batch-switch select { min-width:0; max-width:100%; } }
