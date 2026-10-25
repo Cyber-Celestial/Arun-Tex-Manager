@@ -7,11 +7,12 @@ import * as XLSX from 'xlsx';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { DispatchInvoiceForm } from '@/components/dispatch-invoice-form';
 import { DispatchRecord } from '@/components/dispatch-record';
+import { B2cDayBar, type B2cDaySummary } from '@/components/b2c-day-bar';
 import { DeleteDayControl } from '@/components/delete-day-control';
 import { OverviewCollectionStrip } from '@/components/overview-collection-strip';
 import { OverviewDayPicker } from '@/components/overview-day-picker';
 import { businessDate, localDateKey, pulseTransactions, summarizePulse } from '@/lib/pulse-data';
-import { batchStage, emptyReconciliation, invoiceKey, oneEntryPerInvoice, reconciliationLabel, reconciliationUploaded } from '@/lib/reconciliation';
+import { batchStage, invoiceKey, oneEntryPerInvoice, reconciliationLabel, reconciliationUploaded } from '@/lib/reconciliation';
 import { ChangeLog, WorkflowSteps } from '@/components/reconciliation-workflow';
 import { ReconciliationNumberInput } from '@/components/reconciliation-number-input';
 import '@/components/reconciliation-date.css';
@@ -21,8 +22,8 @@ import NotFound from '@/pages/not-found';
 import {
   getGetWorkspaceMeQueryKey, getGetWorkspaceStateQueryKey, getListWorkspaceUsersQueryKey, useGetWorkspaceMe,
   useGetWorkspaceState, useListWorkspaceUsers, useRequestUploadUrl, useUpdateAttendanceState,
-  useDeleteDispatchDay, useUpdateB2cBankState, useUpdateB2cState, useUpdateDispatchState, useUpdateHrState,
-  useUpdateWorkspaceUserRole,
+  useDeleteB2cDay, useDeleteDispatchDay, useUpdateB2cBankState, useUpdateB2cState, useUpdateDispatchState, useUpdateHrState,
+  useUpdateWorkspaceUserRole, useUploadB2cDay,
 } from '@workspace/api-client-react';
 import type { WorkspaceState, WorkspaceUser } from '@workspace/api-client-react';
 import { Link, Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
@@ -228,12 +229,14 @@ function useWorkspace() {
   const me = useGetWorkspaceMe({ query: { queryKey: getGetWorkspaceMeQueryKey() } });
   const qc = useQueryClient();
   const b2c = useUpdateB2cState({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,b2c:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); }, onError:()=>qc.invalidateQueries({queryKey:getGetWorkspaceStateQueryKey()}) } });
+  const uploadB2c = useUploadB2cDay({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,b2c:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); }, onError:()=>qc.invalidateQueries({queryKey:getGetWorkspaceStateQueryKey()}) } });
+  const deleteB2c = useDeleteB2cDay({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,b2c:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); }, onError:()=>qc.invalidateQueries({queryKey:getGetWorkspaceStateQueryKey()}) } });
   const b2cBank = useUpdateB2cBankState({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,b2c:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); }, onError:()=>qc.invalidateQueries({queryKey:getGetWorkspaceStateQueryKey()}) } });
   const dispatch = useUpdateDispatchState({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,dispatch:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); }, onError:()=>{void qc.invalidateQueries({queryKey:getGetWorkspaceStateQueryKey()});} } });
   const deleteDispatch = useDeleteDispatchDay({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,dispatch:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); }, onError:()=>{void qc.invalidateQueries({queryKey:getGetWorkspaceStateQueryKey()});} } });
   const hr = useUpdateHrState({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,hr:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); } } });
   const attendance = useUpdateAttendanceState({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,hr:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); } } });
-  return { query, me, b2c, b2cBank, dispatch, deleteDispatch, hr, attendance };
+  return { query, me, b2c, b2cBank, uploadB2c, deleteB2c, dispatch, deleteDispatch, hr, attendance };
 }
 function LoadingView() { return <div className="loading-view"><div className="skeleton skeleton-title"/><div className="skeleton-row">{[1,2,3,4].map(i=><div className="skeleton skeleton-card" key={i}/>)}</div><div className="skeleton skeleton-table"/></div>; }
 function LoadError({ retry }: { retry: () => void }) { return <div className="error-state"><CircleAlert size={24}/><h2>Workspace data did not load</h2><p>Check the connection, then try again. No changes have been made.</p><div className="error-actions"><Button kind="primary" onClick={retry}>Try again</Button><Link href="/sign-in" className="text-link">Sign in to workspace</Link></div></div>; }
@@ -279,7 +282,7 @@ export function Overview({ state }: { state: WorkspaceState }) {
   </div>;
 }
 
-function Reconciliation({ state, canEdit, role, save, saveBank }: { state: AnyObj; canEdit: boolean; role: Role; save: (data: AnyObj)=>Promise<unknown>; saveBank: (data: AnyObj)=>Promise<unknown> }) {
+function Reconciliation({ state, canEdit, role, save, saveBank, upload, deleteDay }: { state: AnyObj; canEdit: boolean; role: Role; save: (data: AnyObj)=>Promise<unknown>; saveBank: (data: AnyObj)=>Promise<unknown>; upload: (data: AnyObj)=>Promise<unknown>; deleteDay?: (date: string)=>Promise<unknown> }) {
   const canBank = role==='admin'||role==='accounts';
   const batches = arr(state.batches);
   const [dayKey, setDayKey] = useState(() => businessDate(new URLSearchParams(window.location.search).get('date')) ||
@@ -408,14 +411,15 @@ function Reconciliation({ state, canEdit, role, save, saveBank }: { state: AnyOb
   const bankEditable=canBank&&hasBatch&&active.status!=='Submitted'&&!busy;
   const matchInvoice = (invoiceNumber:string, rowIndex:number) => { const rows=[...bankRows]; rows[rowIndex]={...rows[rowIndex],matchedInvoiceNumber:invoiceNumber}; update({...active,bankRows:rows}); };
   return <div className="page-stack">
-    <PageIntro eyebrow="VASTRA B2C · SALES CONTROL" title="B2C" description={role==='accounts'?'Pick a business date, upload its HDFC statement and review which online payments matched.':'Choose any business date. Upload its invoice workbook once, then finish matching and cash close.'} actions={<>{canEdit&&<><input id="sales-import" type="file" accept=".csv,.txt,.xls,.xlsx" disabled={!batchEditable||uploaded} hidden onChange={e=>{handleImport(e.target.files?.[0]);e.target.value='';}}/><Button onClick={importFile} disabled={!batchEditable||uploaded}><FileSpreadsheet size={15}/> Import Vastra workbook</Button></>}{canExport&&<Button kind="primary" onClick={exportTally} disabled={active.status!=='Submitted'}><FileDown size={15}/> Export Tally Excel</Button>}</>}/>
+    <PageIntro eyebrow="VASTRA B2C · SALES CONTROL" title="B2C" description={role==='accounts'?'Pick a business date, upload its HDFC statement and review which online payments matched.':'Browse any date. The invoice date in the Vastra file decides which day an upload belongs to.'} actions={<>{canEdit&&<><input id="sales-import" type="file" accept=".csv,.txt,.xls,.xlsx" disabled={busy} hidden onChange={e=>{handleImport(e.target.files?.[0]);e.target.value='';}}/><Button onClick={importFile} disabled={busy}><FileSpreadsheet size={15}/> Import Vastra workbook</Button></>}{deleteDay&&<DeleteDayControl label="Delete day" noun="B2C invoices" counts={Object.fromEntries(Object.entries(dayList).map(([day,info])=>[day,info.count||1]))} disabled={busy} warning={day=>batches.some(batch=>businessDate(batch.date)===day&&batch.status==='Submitted')?'This day is locked and already exported to Tally.':null} onDelete={async day=>{await deleteDay(day);setPendingReplace(null);setImportMessage(`B2C for ${reconciliationLabel(day)} was deleted.`);}}/>}{canExport&&<Button kind="primary" onClick={exportTally} disabled={active.status!=='Submitted'}><FileDown size={15}/> Export Tally Excel</Button>}</>}/>
     {importMessage&&<div className="recon-footnote" role="status">{importMessage}</div>}
-    {saveError&&<div className="recon-error" role="alert">{saveError} {pendingImport&&<button type="button" className="btn btn-secondary" disabled={busy} onClick={()=>void runAction(()=>saveInvoiceImport(pendingImport))}>Retry invoice save</button>}</div>}
-    {duplicateDays.length>0&&<div className="recon-error" role="status">Legacy duplicate dates: {duplicateDays.map(reconciliationLabel).join(', ')}. Existing records are preserved; no additional B2C upload is allowed for an already uploaded date.</div>}
-    {canEdit&&<div className="recon-date-create"><label htmlFor="reconciliation-date">CREATE OR OPEN DATE</label><input id="reconciliation-date" data-testid="input-reconciliation-date" aria-label="B2C business date" type="date" value={newBatchDate} disabled={!canEdit||busy} onChange={event=>setNewBatchDate(event.target.value)}/><Button kind="primary" onClick={()=>void addBatch()} disabled={!canEdit||busy||!businessDate(newBatchDate)}>{batches.some(batch=>businessDate(batch.date)===businessDate(newBatchDate))?'Open existing B2C day':'+ Create B2C day'}</Button><small>Any past date · One invoice upload per date</small></div>}
-    <div className="recon-toolbar"><div className="batch-switch"><label htmlFor="active-reconciliation">ACTIVE BATCH</label><select id="active-reconciliation" value={String(selected)} disabled={busy} onChange={e=>selectBatch(Number(e.target.value))} data-testid="select-active-batch">{batches.length ? batches.map((b,i)=><option key={b.id||i} value={i}>{reconciliationLabel(b.date)} · {batchStage(b).label}{duplicateDays.includes(businessDate(b.date))?` · Legacy ${i+1}`:''}</option>) : <option value="0">No batches yet</option>}</select></div><span className="toolbar-divider"/><div className="batch-meta"><span className="green-dot"/><span>{busy?'Saving / reading…':hasBatch?`${tx.length} transactions loaded`:'Create a dated B2C day to begin'}</span><span className="meta-sep">·</span><span className="mono">BATCH {String(selected+1).padStart(2,'0')}</span></div></div>
-    {hasBatch&&<WorkflowSteps batch={active}/>}
-    {uploaded&&<div className="recon-footnote" role="status"><ShieldCheck size={16}/><span>Invoice workbook already uploaded for <strong>{reconciliationLabel(active.date)}</strong>. A second upload is not allowed. Bank matching and payment adjustments remain available until submission.</span></div>}
+    {saveError&&<div className="recon-error" role="alert">{saveError}</div>}
+    {pendingReplace&&<div className="b2c-replace" role="alertdialog" aria-label="Replace this day"><strong>B2C for {reconciliationLabel(pendingReplace.date)} already has {pendingReplace.existing} invoices.</strong><span>Replace them with the {pendingReplace.transactions.length} invoices in {pendingReplace.fileName}? Bank rows and cash counts are kept; cash submission and approval start again.</span><div><Button kind="primary" disabled={busy} onClick={()=>void runAction(()=>uploadDay(pendingReplace,true))}>Replace</Button><Button disabled={busy} onClick={()=>{setPendingReplace(null);setImportMessage('Upload cancelled. Nothing was changed.');}}>Cancel</Button></div></div>}
+    {duplicateDays.length>0&&<div className="recon-error" role="status">Legacy duplicate dates: {duplicateDays.map(reconciliationLabel).join(', ')}. Existing records are preserved. Delete the extra day, then upload again.</div>}
+    <div className="recon-toolbar"><B2cDayBar value={dayKey} today={localDateKey()} days={dayList} onSelect={selectDay}/><span className="toolbar-divider"/><div className="batch-meta"><span className="green-dot"/><span>{busy?'Saving / reading…':hasBatch?`${tx.length} transactions loaded`:'No B2C on this date'}</span></div></div>
+    {hasBatch?<>
+    <WorkflowSteps batch={active}/>
+    {uploaded&&<div className="recon-footnote" role="status"><ShieldCheck size={16}/><span>Invoice workbook uploaded for <strong>{reconciliationLabel(active.date)}</strong>. Importing another file for this date asks whether to replace it. Bank matching and payment adjustments remain available until submission.</span></div>}
     <div className="metric-grid compact-grid"><Metric label="Invoice value" value={money(total)} note={`${tx.length} sales and returns`} icon={FileText}/><Metric label="Cash expected" value={money(expectedCash)} note="From payment allocations" icon={Banknote} color="gold"/>{role!=='accounts'&&<Metric label="Cash counted" value={money(denomTotal)} note={denomTotal===expectedCash?'Denominations balance':'Denominations need review'} icon={ClipboardCheck} color={denomTotal===expectedCash?'teal':'rose'}/>}<Metric label="Bank exceptions" value={`${pending.length}`} note="Card, UPI and split payments" icon={CircleAlert} color="rose"/></div>
     <Panel className="recon-panel"><div className="tabs">{(role==='accounts'?['Transactions','Bank matching']:['Transactions','Bank matching','Denominations']).map(t=><button key={t} onClick={()=>setTab(t)} className={`tab ${tab===t?'tab-active':''}`} data-testid={`tab-${t.toLowerCase().replace(' ','-')}`}>{t}{t==='Bank matching'&&<span className="tab-count">{pending.length}</span>}</button>)}</div>
       {tab==='Transactions' && <><div className="panel-tools"><span className="tool-note"><FileSpreadsheet size={16}/> Vastra invoice register</span><span className="tool-hint">Cash, UPI and card splits must equal each invoice before submission.</span></div>{tx.length ? <div className="table-wrap"><table><thead><tr><th>INVOICE</th><th>DATE</th><th>TYPE</th><th>PAYMENT MODE</th><th>CASH</th><th>UPI</th><th>CARD</th><th className="align-right">INVOICE TOTAL</th></tr></thead><tbody>{tx.map((t,i)=><tr key={`${selected}-${i}-${t.invoiceNumber}`}><td className="strong mono">{t.invoiceNumber || '—'}</td><td>{reconciliationLabel(t.date)}</td><td><StatusPill tone={t.type==='Return'?'bad':'neutral'}>{t.type || 'Invoice'}</StatusPill></td><td><select className="inline-select" value={t.paymentMode || 'CASH'} disabled={!batchEditable} onChange={e=>{const mode=e.target.value,amount=Number(t.totalInvoiceAmount)||0,n=[...tx];n[i]={...t,paymentMode:mode,type:mode==='RETURN'?'Return':'Invoice',cashAmount:mode==='CASH'?amount:0,upiAmount:mode==='UPI'?amount:0,cardAmount:mode==='CARD'?amount:0,bankVerified:mode==='CASH'||mode==='RETURN'};update({...active,transactions:n});}}>{['CASH','CARD','UPI','SPLIT','RETURN'].map(v=><option key={v}>{v}</option>)}</select></td>{['cashAmount','upiAmount','cardAmount'].map(k=><td key={k}><ReconciliationNumberInput label={`${k} ${t.invoiceNumber}`} disabled={!batchEditable||t.type==='Return'} value={Number(t[k] ?? 0)} onCommit={value=>{const n=[...tx];n[i]={...t,[k]:value};void update({...active,transactions:n});}}/></td>)}<td className="align-right mono strong">{money(t.totalInvoiceAmount)}</td></tr>)}</tbody></table></div> : <TableEmpty text="Create a dated B2C day, then import the Vastra B2C workbook to start matching invoices and payments."/>}</>}
@@ -428,7 +432,8 @@ function Reconciliation({ state, canEdit, role, save, saveBank }: { state: AnyOb
           </>
           :<Button kind="primary" disabled={!batchEditable||denomTotal!==expectedCash||!uploaded} onClick={submitCash}><CheckCircle2 size={15}/> Submit cash batch</Button>}</div></div>}
     </Panel>
-    {role==='admin'&&hasBatch&&<ChangeLog entries={arr(active.editLog) as any}/>}
+    {role==='admin'&&<ChangeLog entries={arr(active.editLog) as any}/>}
+    </>:<div className="b2c-empty"><strong>No B2C for {reconciliationLabel(dayKey)}</strong><p>{canEdit?'Import a Vastra workbook for this day. The invoice date inside the file decides which day it is saved to, so you can upload any date from here.':role==='accounts'?'Billing uploads the Vastra file for each day. Once it is there you can upload its HDFC statement.':'Nothing has been uploaded for this date.'}</p>{canEdit&&<Button kind="primary" onClick={importFile} disabled={busy}><FileSpreadsheet size={15}/> Import Vastra workbook</Button>}</div>}
     <div className="recon-footnote"><ShieldCheck size={16}/><span>Every adjustment is recorded in the workspace. Tally export uses the active batch only.</span><StatusPill tone="gold">{canEdit||canBank?'Editing enabled':'Read only'}</StatusPill></div>
   </div>;
 }
@@ -524,7 +529,7 @@ function Team({ role, users, loading, onRole }: {role:Role;users:WorkspaceUser[]
 }
 
 function WorkspaceApp() {
-  const {query,me,b2c,b2cBank,dispatch,deleteDispatch,hr,attendance}=useWorkspace();
+  const {query,me,b2c,b2cBank,uploadB2c,deleteB2c,dispatch,deleteDispatch,hr,attendance}=useWorkspace();
   const roleMutation=useUpdateWorkspaceUserRole();
   const usersQuery=useListWorkspaceUsers({query:{queryKey:getListWorkspaceUsersQueryKey(),enabled:me.data?.role==='admin'}});
   const role=(me.data?.role || query.data?.user?.role || 'pending') as Role;
@@ -538,7 +543,7 @@ function WorkspaceApp() {
   const canPeople=role==='admin'||role==='accounts';
   return <AppShell role={role} name={name}><ErrorBoundary resetKey={loc}><Switch>
     <Route path="/"><Overview state={data}/></Route>
-    <Route path="/reconciliation">{canOperate||role==='accounts'?<Reconciliation state={data.b2c as AnyObj} canEdit={canOperate} role={role} save={next=>b2c.mutateAsync({data:{expectedVersion:data.version,data:next}})} saveBank={next=>b2cBank.mutateAsync({data:{expectedVersion:data.version,data:next}})}/>:<AccessDenied/>}</Route>
+    <Route path="/reconciliation">{canOperate||role==='accounts'?<Reconciliation state={data.b2c as AnyObj} canEdit={canOperate} role={role} save={next=>b2c.mutateAsync({data:{expectedVersion:data.version,data:next}})} saveBank={next=>b2cBank.mutateAsync({data:{expectedVersion:data.version,data:next}})} upload={next=>uploadB2c.mutateAsync({data:{expectedVersion:data.version,data:next}})} deleteDay={role==='admin'?(date=>deleteB2c.mutateAsync({data:{expectedVersion:data.version,data:{date}}})):undefined}/>:<AccessDenied/>}</Route>
     <Route path="/dispatch">{canOperate?<Dispatch state={data.dispatch as AnyObj} canEdit={canOperate} save={next=>dispatch.mutateAsync({data:{expectedVersion:data.version,data:next}})} onDeleteDay={role==='admin'?(date=>deleteDispatch.mutateAsync({data:{expectedVersion:data.version,data:{date}}})):undefined}/>:<AccessDenied/>}</Route>
     <Route path="/people">{canPeople?<People state={data.hr as AnyObj} canEdit={role==='admin'} canLog={canPeople} save={next=>save(hr,next)} saveAttendance={next=>save(attendance,next)}/>:<AccessDenied/>}</Route>
     <Route path="/payroll">{canPeople?<Payroll state={data.hr as AnyObj} canEdit={role==='admin'} save={next=>save(hr,next)}/>:<AccessDenied/>}</Route>
