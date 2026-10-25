@@ -1,0 +1,12 @@
+.collection-strip { display:grid; grid-template-columns:auto minmax(120px,1fr) auto; align-items:center; gap:8px 18px; padding:11px 16px; border:1px solid #e8e3d6; border-radius:10px; background:#fffdf8; }
+.collection-strip-title { font:600 9px var(--app-font-mono); letter-spacing:.15em; color:#77827a; white-space:nowrap; }
+.collection-strip-bar { display:flex; height:6px; border-radius:6px; overflow:hidden; background:#eeece4; }
+.collection-strip-bar i { display:block; height:100%; transition:width .3s ease; }
+.collection-strip-legend { display:flex; flex-wrap:wrap; gap:6px 16px; font-size:11px; color:#5d6862; }
+.collection-strip-legend span { display:inline-flex; align-items:center; gap:6px; }
+.collection-strip-legend strong { font-size:11px; color:#34403c; }
+.collection-strip-legend i { width:7px; height:7px; border-radius:50%; }
+.strip-cash { background:#4f876d; }
+.strip-upi { background:#c5a45c; }
+.strip-card { background:#7890a0; }
+@media (max-width:720px) { .collection-strip { grid-template-columns:1fr; } }
