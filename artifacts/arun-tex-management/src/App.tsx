@@ -7,6 +7,8 @@ import * as XLSX from 'xlsx';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { DispatchInvoiceForm } from '@/components/dispatch-invoice-form';
 import { DispatchRecord } from '@/components/dispatch-record';
+import { PulseDateNavigation } from '@/components/pulse-date-navigation';
+import { localDateKey, pulseTransactions, summarizePulse, type PulseMode } from '@/lib/pulse-data';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
@@ -231,15 +233,23 @@ function PageIntro({ eyebrow, title, description, actions }: { eyebrow: string; 
   return <div className="page-intro"><div><div className="eyebrow">{eyebrow}</div><h1 className="display">{title}</h1><p>{description}</p></div>{actions && <div className="intro-actions">{actions}</div>}</div>;
 }
 
-function Overview({ state }: { state: WorkspaceState }) {
+export function Overview({ state }: { state: WorkspaceState }) {
+  const [pulseDate, setPulseDate] = useState(() => localDateKey());
+  const [pulseMode, setPulseMode] = useState<PulseMode>('day');
   const b2c = state.b2c as AnyObj; const ds = state.dispatch as AnyObj; const hr = state.hr as AnyObj;
   const batches = arr(b2c.batches); const tx = batches.flatMap(b => arr(b.transactions)); const invoices = arr(ds.invoices);
   const employees = arr(hr.employees); const exceptions = arr(hr.attendance);
-  const todayKey = new Date().toISOString().slice(0,10);
+  const todayKey = localDateKey();
   const todayTx = tx.filter(t=>String(t.date||'').slice(0,10)===todayKey);
   const cash = todayTx.reduce((n,t)=>n+Number(t.cashAmount||0),0); const sales = todayTx.filter(t=>t.type !== 'Return').reduce((n,t)=>n+Number(t.totalInvoiceAmount||0),0);
-  const paymentMix = [{name:'Cash',amount:cash,color:'mix-cash'},{name:'UPI',amount:todayTx.reduce((n,t)=>n+Number(t.upiAmount||0),0),color:'mix-upi'},{name:'Card',amount:todayTx.reduce((n,t)=>n+Number(t.cardAmount||0),0),color:'mix-card'}];
-  const mixTotal = paymentMix.reduce((s,item)=>s+item.amount,0);
+  const datedTransactions = pulseTransactions(batches);
+  const pulse = summarizePulse(datedTransactions, pulseDate, pulseMode);
+  const selectedDate = new Date(`${pulseDate}T12:00:00`);
+  const periodLabel = selectedDate.toLocaleDateString('en-IN', pulseMode === 'month'
+    ? { month: 'long', year: 'numeric' } : { day: '2-digit', month: 'short', year: 'numeric' });
+  const selectedMix = [{name:'Cash',amount:pulse.cash,color:'mix-cash'},
+    {name:'UPI',amount:pulse.upi,color:'mix-upi'}, {name:'Card',amount:pulse.card,color:'mix-card'}];
+  const selectedMixTotal = selectedMix.reduce((sum,item)=>sum+Math.max(0,item.amount),0);
   const unmatched = todayTx.filter(t => !t.bankVerified && ['UPI','CARD','SPLIT'].includes(t.paymentMode)).length;
   const pendingDispatch = invoices.filter(i => i.status !== 'Completed').length;
   const pendingPeople = exceptions.length;
@@ -252,9 +262,11 @@ function Overview({ state }: { state: WorkspaceState }) {
       <Metric label="People exceptions" value={`${pendingPeople}`} note={`${employees.length} active employees`} icon={Users} color="rose"/>
     </div>
     <div className="overview-grid">
-      <Panel className="activity-panel"><PanelHeading kicker="TODAY AT A GLANCE" title="Close-out pulse" action={<span className="mono faint">{new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short'}).toUpperCase()}</span>}/>
-        <div className="pulse-total"><div><span>Recorded invoice value</span><strong className="mono">{money(sales)}</strong></div><div className="pulse-mark"><Activity size={19}/></div></div>
-        <div className="mix-heading"><span>COLLECTION BY PAYMENT MODE</span><span>FROM INVOICE ALLOCATION</span></div><div className="payment-mix">{paymentMix.map(item=><div className="mix-row" key={item.name}><div className="mix-label"><span><i className={item.color}/>{item.name}</span><strong className="mono">{money(item.amount)}</strong></div><div className="mix-track"><i className={item.color} style={{width:`${mixTotal?Math.max(2,item.amount/mixTotal*100):0}%`}}/></div></div>)}</div><div className="chart-legend"><span><i/> TODAY'S ALLOCATIONS</span><span>Based on invoice payment records</span></div>
+      <Panel className="activity-panel"><PanelHeading kicker="BROWSE DAY CLOSES" title="Close-out pulse" action={<span className="mono faint">{periodLabel.toUpperCase()}</span>}/>
+        <PulseDateNavigation value={pulseDate} onChange={setPulseDate} mode={pulseMode} onModeChange={setPulseMode} availableDates={datedTransactions.map(row=>row.date).filter(Boolean)} today={todayKey}/>
+        <div className="pulse-total"><div><span>{pulseMode==='month'?'Monthly':'Daily'} recorded invoice value</span><strong className="mono">{money(pulse.sales)}</strong></div><div className="pulse-mark"><Activity size={19}/></div></div>
+        <p className="pulse-period-note" role="status">{pulse.count ? `${pulse.count} invoice / return records · ${periodLabel}` : `No invoice records for this ${pulseMode}. Showing ₹0.`}</p>
+        <div className="mix-heading"><span>COLLECTION BY PAYMENT MODE</span><span>FROM INVOICE ALLOCATION</span></div><div className="payment-mix">{selectedMix.map(item=><div className="mix-row" key={item.name}><div className="mix-label"><span><i className={item.color}/>{item.name}</span><strong className="mono">{money(item.amount)}</strong></div><div className="mix-track"><i className={item.color} style={{width:`${selectedMixTotal?Math.max(0,item.amount)/selectedMixTotal*100:0}%`}}/></div></div>)}</div><div className="chart-legend"><span><i/> {pulseMode==='month'?'MONTHLY':'DAILY'} ALLOCATIONS</span><span>Based on invoice payment records</span></div>
       </Panel>
       <Panel className="close-panel"><PanelHeading kicker="THE NEXT RIGHT THING" title="Needs your attention"/>
         <div className="attention-list">
