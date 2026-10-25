@@ -7,6 +7,7 @@ import * as XLSX from 'xlsx';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { DispatchInvoiceForm } from '@/components/dispatch-invoice-form';
 import { DispatchRecord } from '@/components/dispatch-record';
+import { OverviewCollectionStrip } from '@/components/overview-collection-strip';
 import { OverviewDayPicker } from '@/components/overview-day-picker';
 import { businessDate, localDateKey, pulseTransactions, summarizePulse } from '@/lib/pulse-data';
 import { emptyReconciliation, reconciliationLabel, reconciliationUploaded } from '@/lib/reconciliation';
@@ -259,6 +260,7 @@ export function Overview({ state }: { state: WorkspaceState }) {
       <Metric label="B2B dispatches" value={`${invoices.length - pendingDispatch} / ${invoices.length}`} note={`${pendingDispatch} need attention`} icon={PackageCheck} color="blue"/>
       <Metric label="People exceptions" value={`${pendingPeople}`} note={`${employees.length} active employees`} icon={Users} color="rose"/>
     </div>
+    <OverviewCollectionStrip amounts={day} format={money}/>
     <Panel className="close-panel"><PanelHeading kicker="THE NEXT RIGHT THING" title="Needs your attention"/>
       <div className="attention-list">
         <Link href="/reconciliation" className="attention-item"><span className="attention-icon coral"><FileSpreadsheet size={17}/></span><span className="attention-copy"><strong>Bank matches to review</strong><small>{unmatched} invoices awaiting a bank match</small></span><span className={`attention-count ${unmatched ? 'count-warn' : ''}`}>{unmatched}</span><ArrowRight size={16}/></Link>
