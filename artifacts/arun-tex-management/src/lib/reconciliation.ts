@@ -16,6 +16,21 @@ export function emptyReconciliation(date: string) {
     denominations: { '500': 0, '200': 0, '100': 0, '50': 0, '20': 0, '10': 0, '5': 0, '2': 0, '1': 0 } };
 }
 
+export type BatchStage = { label: string; tone: 'neutral' | 'warn' | 'good' };
+
+/** Where a reconciliation stands in the Billing submit → Admin approval → lock flow. */
+export function batchStage(batch: Record<string, any>): BatchStage {
+  if (batch.status === 'Submitted') return { label: 'Locked', tone: 'good' };
+  if (batch.adminApproved) return { label: 'Approved · awaiting bank', tone: 'warn' };
+  if (batch.billingSubmitted) return { label: 'Cash submitted', tone: 'warn' };
+  return { label: 'Open', tone: 'neutral' };
+}
+
+export function onlinePaymentCounts(transactions: Record<string, any>[]) {
+  const online = transactions.filter(row => row.type !== 'Return' && (Number(row.upiAmount) > 0 || Number(row.cardAmount) > 0));
+  return { verified: online.filter(row => row.bankVerified === true).length, total: online.length };
+}
+
 export const invoiceKey = (value: unknown): string => String(value ?? '').trim().toUpperCase();
 
 /**
