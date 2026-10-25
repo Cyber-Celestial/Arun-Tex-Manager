@@ -1,1 +1,2 @@
 - [Local invoice extraction policy](local-invoice-extraction.md) — keep invoice parsing local and distinguish extracted IDs from verified transport compliance.
+- [Reconciliation upload policy](reconciliation-upload-policy.md) — allow any past business date, but never upload reconciliation twice for the same date.
