@@ -102,6 +102,24 @@ export const UpdateDispatchStateResponse = zod.object({
 
 
 /**
+ * @summary Delete every B2B dispatch invoice dated on one day (Admin)
+ */
+export const deleteDispatchDayBodyExpectedVersionMin = 0;
+
+
+
+export const DeleteDispatchDayBody = zod.object({
+  "expectedVersion": zod.number().int().min(deleteDispatchDayBodyExpectedVersionMin),
+  "data": zod.record(zod.string(), zod.unknown())
+})
+
+export const DeleteDispatchDayResponse = zod.object({
+  "version": zod.number().int(),
+  "data": zod.record(zod.string(), zod.unknown())
+})
+
+
+/**
  * @summary Save HR, attendance, roster, and advance data
  */
 export const updateHrStateBodyExpectedVersionMin = 0;
