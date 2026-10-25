@@ -52,3 +52,15 @@ test('dates accept Indian day-first text, ISO text, real dates and Excel serial 
   assert.equal(dateCell(46319), '2026-10-24');
   assert.equal(dateCell('not a date'), '');
 });
+
+test('a real sales return export (all cells are text, day-month-year dates) reads correctly', () => {
+  const realReturn = [{
+    'Order Return Number': 'SGR-1', 'Manual Credit Note No': '', 'Bill No': '', 'Lr No': '', 'Date': '07-09-2026',
+    'Party Name': 'VANITHA 7867849444', 'Quantity': '2', 'Price': '600', 'Amount': '1200',
+    'CGST': '30', 'SGST': '30', 'Total Amount': '1260', 'Shipping Charge': '', 'Round Off': '', 'Net Amount': '1260',
+  }];
+  const result = parseVastraSheets([{ name: 'Order Return Tally', rows: realReturn }], 'return');
+  assert.deepEqual(result, { rows: [{ invoiceNumber: 'SGR-1', date: '2026-09-07', totalInvoiceAmount: 1260, type: 'Return',
+    paymentMode: 'RETURN', cashAmount: 0, upiAmount: 0, cardAmount: 0, bankVerified: true }] });
+  assert.match((parseVastraSheets([{ name: 'Order Return Tally', rows: realReturn }], 'invoice') as any).error, /choose Sales returns/);
+});
