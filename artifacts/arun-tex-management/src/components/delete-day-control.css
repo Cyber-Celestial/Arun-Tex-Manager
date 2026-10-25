@@ -1,0 +1,15 @@
+.delete-day { position:relative; display:inline-block; }
+.delete-day-trigger { display:inline-flex; align-items:center; gap:7px; }
+.delete-day-popover { position:absolute; z-index:30; top:calc(100% + 8px); right:0; width:max-content; max-width:min(360px, 92vw); padding:10px; border:1px solid #e3ddcf; border-radius:12px; background:#fffdf8; box-shadow:0 14px 34px #17201c24; color:#3d4846; }
+.delete-day-popover .rdp-root { --rdp-accent-color:#8f3f33; --rdp-accent-background-color:#f6e4de; --rdp-day-height:38px; --rdp-day-width:38px; --rdp-day_button-height:36px; --rdp-day_button-width:36px; --rdp-day_button-border-radius:8px; --rdp-selected-border:2px solid #8f3f33; font-size:13px; }
+.delete-day-popover .rdp-month_caption { font:700 14px var(--app-font-serif, inherit); color:#2f3a3d; }
+.delete-day-popover .rdp-weekday { font:600 10px var(--app-font-mono, inherit); letter-spacing:.06em; color:#8a8f86; text-transform:uppercase; }
+.delete-day-popover .rdp-chevron { fill:#246451; }
+.delete-day-popover .rdp-disabled { opacity:.28; }
+.delete-day-has-data button { position:relative; font-weight:700; }
+.delete-day-has-data button::after { content:''; position:absolute; bottom:3px; left:50%; width:5px; height:5px; margin-left:-2.5px; border-radius:50%; background:#c9a24d; }
+.delete-day-hint, .delete-day-empty { margin:2px 4px 6px; font-size:11px; color:#6f7a72; }
+.delete-day-confirm { display:grid; gap:6px; margin-top:8px; padding:11px 12px; border-radius:9px; background:#f6e4de; border:1px solid #e3b9ad; font-size:12px; color:#7c3a2e; }
+.delete-day-confirm > div { display:flex; gap:8px; margin-top:4px; }
+.delete-day-warning { font-weight:600; }
+.delete-day-error { color:#9a2f22; font-weight:600; }

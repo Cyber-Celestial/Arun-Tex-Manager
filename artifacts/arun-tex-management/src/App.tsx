@@ -7,6 +7,7 @@ import * as XLSX from 'xlsx';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { DispatchInvoiceForm } from '@/components/dispatch-invoice-form';
 import { DispatchRecord } from '@/components/dispatch-record';
+import { DeleteDayControl } from '@/components/delete-day-control';
 import { OverviewCollectionStrip } from '@/components/overview-collection-strip';
 import { OverviewDayPicker } from '@/components/overview-day-picker';
 import { businessDate, localDateKey, pulseTransactions, summarizePulse } from '@/lib/pulse-data';
@@ -20,7 +21,7 @@ import NotFound from '@/pages/not-found';
 import {
   getGetWorkspaceMeQueryKey, getGetWorkspaceStateQueryKey, getListWorkspaceUsersQueryKey, useGetWorkspaceMe,
   useGetWorkspaceState, useListWorkspaceUsers, useRequestUploadUrl, useUpdateAttendanceState,
-  useUpdateB2cBankState, useUpdateB2cState, useUpdateDispatchState, useUpdateHrState,
+  useDeleteDispatchDay, useUpdateB2cBankState, useUpdateB2cState, useUpdateDispatchState, useUpdateHrState,
   useUpdateWorkspaceUserRole,
 } from '@workspace/api-client-react';
 import type { WorkspaceState, WorkspaceUser } from '@workspace/api-client-react';
@@ -229,9 +230,10 @@ function useWorkspace() {
   const b2c = useUpdateB2cState({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,b2c:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); }, onError:()=>qc.invalidateQueries({queryKey:getGetWorkspaceStateQueryKey()}) } });
   const b2cBank = useUpdateB2cBankState({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,b2c:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); }, onError:()=>qc.invalidateQueries({queryKey:getGetWorkspaceStateQueryKey()}) } });
   const dispatch = useUpdateDispatchState({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,dispatch:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); }, onError:()=>{void qc.invalidateQueries({queryKey:getGetWorkspaceStateQueryKey()});} } });
+  const deleteDispatch = useDeleteDispatchDay({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,dispatch:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); }, onError:()=>{void qc.invalidateQueries({queryKey:getGetWorkspaceStateQueryKey()});} } });
   const hr = useUpdateHrState({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,hr:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); } } });
   const attendance = useUpdateAttendanceState({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,hr:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); } } });
-  return { query, me, b2c, b2cBank, dispatch, hr, attendance };
+  return { query, me, b2c, b2cBank, dispatch, deleteDispatch, hr, attendance };
 }
 function LoadingView() { return <div className="loading-view"><div className="skeleton skeleton-title"/><div className="skeleton-row">{[1,2,3,4].map(i=><div className="skeleton skeleton-card" key={i}/>)}</div><div className="skeleton skeleton-table"/></div>; }
 function LoadError({ retry }: { retry: () => void }) { return <div className="error-state"><CircleAlert size={24}/><h2>Workspace data did not load</h2><p>Check the connection, then try again. No changes have been made.</p><div className="error-actions"><Button kind="primary" onClick={retry}>Try again</Button><Link href="/sign-in" className="text-link">Sign in to workspace</Link></div></div>; }
@@ -443,7 +445,7 @@ function Reconciliation({ state, canEdit, role, save, saveBank }: { state: AnyOb
   </div>;
 }
 
-function Dispatch({ state, canEdit, save }: { state: AnyObj; canEdit: boolean; save:(data:AnyObj)=>Promise<unknown> }) {
+function Dispatch({ state, canEdit, save, onDeleteDay }: { state: AnyObj; canEdit: boolean; save:(data:AnyObj)=>Promise<unknown>; onDeleteDay?: (day:string)=>Promise<unknown> }) {
   const [filter,setFilter]=useState('All'); const [search,setSearch]=useState('');
   const [editing,setEditing]=useState<number|null>(null); const [openInvoice,setOpenInvoice]=useState<number|null>(null); const [saveError,setSaveError]=useState('');
   const [saving,setSaving]=useState(false);
@@ -456,9 +458,11 @@ function Dispatch({ state, canEdit, save }: { state: AnyObj; canEdit: boolean; s
     await save({...state,invoices:next});setEditing(null);
   };
   const visible: Array<AnyObj & {_idx:number}>=invoices.map((v,i)=>({...v,_idx:i} as AnyObj & {_idx:number})).filter(v=>(filter==='All'||v.status===filter)&&`${v.invoiceNumber} ${v.customerName}`.toLowerCase().includes(search.toLowerCase())).sort((a,b)=>String(a.date||'').localeCompare(String(b.date||''))||String(a.invoiceNumber||'').localeCompare(String(b.invoiceNumber||''),undefined,{numeric:true}));
+  const dayCounts=invoices.reduce<Record<string,number>>((acc,invoice)=>{const day=businessDate(invoice.date);if(day)acc[day]=(acc[day]||0)+1;return acc;},{});
+  const deleteDay=async(day:string)=>{await onDeleteDay!(day);setOpenInvoice(null);setEditing(null);setSaveError('');};
   const printLabels=()=>window.print();
   return <div className="page-stack">
-    <PageIntro eyebrow="B2B · DISPATCH DESK" title="Dispatch, without the loose ends." description="Make each compliance step visible before a bundle leaves the floor." actions={<><Button onClick={()=>setEditing(-1)} disabled={!canEdit||editing!==null}>+ Add B2B invoice</Button><Button kind="primary" onClick={printLabels}><Printer size={15}/> Print labels</Button></>}/>
+    <PageIntro eyebrow="B2B · DISPATCH DESK" title="Dispatch, without the loose ends." description="Make each compliance step visible before a bundle leaves the floor." actions={<><Button onClick={()=>setEditing(-1)} disabled={!canEdit||editing!==null}>+ Add B2B invoice</Button>{onDeleteDay&&<DeleteDayControl label="Delete day" noun="dispatch invoices" counts={dayCounts} disabled={saving||editing!==null} onDelete={deleteDay}/>}<Button kind="primary" onClick={printLabels}><Printer size={15}/> Print labels</Button></>}/>
     {editing!==null&&canEdit&&<DispatchInvoiceForm key={editing} initial={editing>=0?invoices[editing]:undefined} onSave={saveInvoice} onCancel={()=>setEditing(null)}/>}
     {saveError&&<div className="invoice-save-error" role="alert">{saveError}</div>}
     <div className="dispatch-banner"><div className="banner-icon"><PackageCheck size={19}/></div><div><strong>Compliance before courier handoff</strong><p>Complete e-invoice, e-way bill, bundle and carrier details. WhatsApp is not connected: send outside this app, then mark it sent.</p></div><span className="banner-count">{invoices.filter(i=>i.status==='Completed').length}<small>DONE</small></span></div>
@@ -532,7 +536,7 @@ function Team({ role, users, loading, onRole }: {role:Role;users:WorkspaceUser[]
 }
 
 function WorkspaceApp() {
-  const {query,me,b2c,b2cBank,dispatch,hr,attendance}=useWorkspace();
+  const {query,me,b2c,b2cBank,dispatch,deleteDispatch,hr,attendance}=useWorkspace();
   const roleMutation=useUpdateWorkspaceUserRole();
   const usersQuery=useListWorkspaceUsers({query:{queryKey:getListWorkspaceUsersQueryKey(),enabled:me.data?.role==='admin'}});
   const role=(me.data?.role || query.data?.user?.role || 'pending') as Role;
@@ -547,7 +551,7 @@ function WorkspaceApp() {
   return <AppShell role={role} name={name}><ErrorBoundary resetKey={loc}><Switch>
     <Route path="/"><Overview state={data}/></Route>
     <Route path="/reconciliation">{canOperate||role==='accounts'?<Reconciliation state={data.b2c as AnyObj} canEdit={canOperate} role={role} save={next=>b2c.mutateAsync({data:{expectedVersion:data.version,data:next}})} saveBank={next=>b2cBank.mutateAsync({data:{expectedVersion:data.version,data:next}})}/>:<AccessDenied/>}</Route>
-    <Route path="/dispatch">{canOperate?<Dispatch state={data.dispatch as AnyObj} canEdit={canOperate} save={next=>dispatch.mutateAsync({data:{expectedVersion:data.version,data:next}})}/>:<AccessDenied/>}</Route>
+    <Route path="/dispatch">{canOperate?<Dispatch state={data.dispatch as AnyObj} canEdit={canOperate} save={next=>dispatch.mutateAsync({data:{expectedVersion:data.version,data:next}})} onDeleteDay={role==='admin'?(date=>deleteDispatch.mutateAsync({data:{expectedVersion:data.version,data:{date}}})):undefined}/>:<AccessDenied/>}</Route>
     <Route path="/people">{canPeople?<People state={data.hr as AnyObj} canEdit={role==='admin'} canLog={canPeople} save={next=>save(hr,next)} saveAttendance={next=>save(attendance,next)}/>:<AccessDenied/>}</Route>
     <Route path="/payroll">{canPeople?<Payroll state={data.hr as AnyObj} canEdit={role==='admin'} save={next=>save(hr,next)}/>:<AccessDenied/>}</Route>
     <Route path="/team">{role==='admin'?<Team role={role} users={(usersQuery.data||[]) as WorkspaceUser[]} loading={usersQuery.isLoading} onRole={(userId,nextRole)=>roleMutation.mutate({userId,data:{role:nextRole}},{onSuccess:()=>queryClient.invalidateQueries({queryKey:getListWorkspaceUsersQueryKey()})})}/>:<AccessDenied/>}</Route>
