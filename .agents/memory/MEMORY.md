@@ -1,0 +1,1 @@
+- [Local invoice extraction policy](local-invoice-extraction.md) — keep invoice parsing local and distinguish extracted IDs from verified transport compliance.
