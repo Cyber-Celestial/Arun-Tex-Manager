@@ -5,6 +5,8 @@ import {
   ListWorkspaceUsersResponse,
   UpdateAttendanceStateBody,
   UpdateAttendanceStateResponse,
+  UpdateB2cBankStateBody,
+  UpdateB2cBankStateResponse,
   UpdateB2cStateBody,
   UpdateB2cStateResponse,
   UpdateDispatchStateBody,
@@ -26,7 +28,9 @@ import { and, eq, sql } from "drizzle-orm";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { isDeepStrictEqual } from "node:util";
 import { validateDispatchState } from "../lib/dispatch-validation";
-import { validateReconciliationChange } from "../lib/reconciliation-policy";
+import { appendBankRows, sanitizeBankRows, validateB2cRoleChange } from "../lib/reconciliation-bank";
+import { reconciliationDate, validateReconciliationChange } from "../lib/reconciliation-policy";
+import { applyBatchWorkflow, countedCash, settleBatch, type Actor } from "../lib/reconciliation-workflow";
 
 const router: IRouter = Router();
 
@@ -138,15 +142,6 @@ async function ensureStateRow(): Promise<void> {
     .onConflictDoNothing();
 }
 
-function cashDenominationTotal(denominations: unknown): number {
-  if (!isObject(denominations)) return 0;
-  const notes = [500, 200, 100, 50, 20, 10, 5, 2, 1];
-  return notes.reduce((sum, value) => {
-    const count = Number(denominations[String(value)] ?? 0);
-    return sum + (Number.isFinite(count) && count > 0 ? value * count : 0);
-  }, 0);
-}
-
 function classifyBankMode(row: JsonObject): "UPI" | "CARD" | null {
   const mode = String(row.mode ?? "").toUpperCase();
   if (mode.includes("UPI")) return "UPI";
@@ -228,6 +223,7 @@ function validateB2cState(data: JsonObject): string | null {
     }
     let cashSales = 0;
     let returns = 0;
+    const cashClosed = batch.status === "Submitted" || batch.billingSubmitted === true;
     for (const transactionValue of batch.transactions) {
       if (!isObject(transactionValue)) return "A transaction is not valid.";
       const transaction = transactionValue;
@@ -245,7 +241,7 @@ function validateB2cState(data: JsonObject): string | null {
       if (![cash, upi, card].every((part) => Number.isFinite(part) && part >= 0)) {
         return "Payment amounts must be valid, non-negative numbers.";
       }
-      if (batch.status === "Submitted") {
+      if (cashClosed) {
         if (
           transaction.paymentMode === "SPLIT" &&
           Math.round((cash + upi + card) * 100) !== Math.round(amount * 100)
@@ -274,8 +270,8 @@ function validateB2cState(data: JsonObject): string | null {
       cashSales += cash;
     }
 
-    if (batch.status === "Submitted") {
-      const onlineMissing = batch.transactions.some((item) => {
+    if (cashClosed) {
+      const onlineMissing = batch.status === "Submitted" && batch.transactions.some((item) => {
         if (!isObject(item) || item.type === "Return") return false;
         return (
           (Number(item.upiAmount ?? 0) > 0 ||
@@ -287,7 +283,7 @@ function validateB2cState(data: JsonObject): string | null {
         return "Online payments must be bank-verified before the day is submitted.";
       }
       const expectedCash = Math.round((cashSales - returns) * 100);
-      const enteredCash = Math.round(cashDenominationTotal(batch.denominations) * 100);
+      const enteredCash = Math.round(countedCash(batch.denominations) * 100);
       if (expectedCash !== enteredCash) {
         return "Cash denominations must exactly match cash sales less returns.";
       }
@@ -339,6 +335,27 @@ function validateHrState(data: JsonObject): string | null {
   return null;
 }
 
+/** Accounts see every reconciliation in order, without cash counts; the export only once locked. */
+function accountsB2cView(b2c: JsonObject): JsonObject {
+  const batches = Array.isArray(b2c.batches) ? b2c.batches : [];
+  return {
+    batches: batches.map((batch) => {
+      const record = isObject(batch) ? batch : {};
+      return {
+        id: record.id,
+        date: record.date,
+        status: record.status,
+        billingSubmitted: record.billingSubmitted,
+        adminApproved: record.adminApproved,
+        transactions: record.transactions,
+        bankRows: record.bankRows,
+        invoiceImport: record.invoiceImport,
+        tallyExport: record.status === "Submitted" ? record.tallyExport : undefined,
+      };
+    }),
+  };
+}
+
 function applyRoleProjection(
   role: WorkspaceRole,
   state: typeof operationsStateTable.$inferSelect,
@@ -349,22 +366,10 @@ function applyRoleProjection(
   const hr = state.hr as JsonObject;
 
   if (role === "accounts") {
-    const batches = Array.isArray(b2c.batches) ? b2c.batches : [];
     return {
       version: state.version,
       user,
-      b2c: {
-        batches: batches
-          .filter((batch) => isObject(batch) && batch.status === "Submitted")
-          .map((batch) => {
-            const record = batch as JsonObject;
-            return {
-              date: record.date,
-              status: record.status,
-              tallyExport: record.tallyExport,
-            };
-          }),
-      },
+      b2c: accountsB2cView(b2c),
       dispatch: { invoices: [] },
       hr,
     };
@@ -394,6 +399,10 @@ function applyRoleProjection(
     dispatch,
     hr,
   };
+}
+
+function actorOf(user: WorkspaceUser): Actor {
+  return { userId: user.userId, name: user.name, role: user.role };
 }
 
 function activeRole(role: WorkspaceRole): boolean {
@@ -516,6 +525,11 @@ async function writeModule(
         ? current.b2c.batches
         : [];
     const nextBatches = Array.isArray(data.batches) ? data.batches : [];
+    const roleError = validateB2cRoleChange(user.role, data, isObject(current?.b2c) ? current.b2c : {});
+    if (roleError) {
+      res.status(403).json({ error: roleError });
+      return;
+    }
     const importError = validateReconciliationChange(data, isObject(current?.b2c) ? current.b2c : {});
     if (importError) {
       res.status(409).json({ error: importError });
@@ -531,6 +545,11 @@ async function writeModule(
       res.status(409).json({
         error: "Submitted batches are locked. Start a new batch for later adjustments.",
       });
+      return;
+    }
+    const workflowError = applyBatchWorkflow(nextBatches, currentBatches, actorOf(user), new Date().toISOString());
+    if (workflowError) {
+      res.status(workflowError.status).json({ error: workflowError.error });
       return;
     }
   }
@@ -615,6 +634,62 @@ router.put("/workspace/data/b2c", async (req, res): Promise<void> => {
     UpdateB2cStateBody,
     UpdateB2cStateResponse,
   );
+});
+
+router.put("/workspace/data/b2c/bank", async (req, res): Promise<void> => {
+  const user = await requireWorkspaceUser(req, res);
+  if (!user) return;
+  if (user.role !== "admin" && user.role !== "accounts") {
+    res.status(403).json({ error: "Accounts or Admin access is required to upload bank statements." });
+    return;
+  }
+  const parsed = UpdateB2cBankStateBody.safeParse(req.body);
+  const request = parsed.success ? parsed.data.data : {};
+  const batchIndex = Number(request.batchIndex);
+  const day = reconciliationDate(request.date);
+  const incoming = sanitizeBankRows(request.rows);
+  if (!parsed.success || !Number.isInteger(batchIndex) || batchIndex < 0 || !day || !incoming) {
+    res.status(400).json({ error: "Choose a reconciliation and upload valid HDFC deposit rows." });
+    return;
+  }
+
+  await ensureStateRow();
+  const [current] = await db
+    .select({ b2c: operationsStateTable.b2c, version: operationsStateTable.version })
+    .from(operationsStateTable)
+    .where(eq(operationsStateTable.id, "main"))
+    .limit(1);
+  if (current.version !== parsed.data.expectedVersion) {
+    res.status(409).json({ error: "The workspace changed in another session. Refresh and try again." });
+    return;
+  }
+  const b2c = structuredClone(current.b2c) as JsonObject;
+  const batch = Array.isArray(b2c.batches) ? b2c.batches[batchIndex] : undefined;
+  if (!isObject(batch) || reconciliationDate(batch.date) !== day) {
+    res.status(409).json({ error: "That reconciliation has changed. Refresh and try again." });
+    return;
+  }
+  if (batch.status === "Submitted") {
+    res.status(409).json({ error: "Submitted batches are locked. Start a new batch for later adjustments." });
+    return;
+  }
+  batch.bankRows = appendBankRows(batch.bankRows, incoming).rows;
+  matchOnlinePayments({ batches: [batch] }, user.role);
+  settleBatch(batch, actorOf(user), new Date().toISOString());
+
+  const updated = await db
+    .update(operationsStateTable)
+    .set({ b2c, version: sql`${operationsStateTable.version} + 1` })
+    .where(and(eq(operationsStateTable.id, "main"), eq(operationsStateTable.version, parsed.data.expectedVersion)))
+    .returning({ version: operationsStateTable.version });
+  if (!updated[0]) {
+    res.status(409).json({ error: "The workspace changed in another session. Refresh and try again." });
+    return;
+  }
+  res.json(UpdateB2cBankStateResponse.parse({
+    version: updated[0].version,
+    data: user.role === "accounts" ? accountsB2cView(b2c) : b2c,
+  }));
 });
 
 router.put("/workspace/data/dispatch", async (req, res): Promise<void> => {

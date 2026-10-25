@@ -101,3 +101,19 @@ test('invalid new dates and empty success receipts are rejected without blocking
   const next=copy(legacy);next.batches.push(batch('2025-01-01'));
   assert.equal(validateReconciliationChange(next,legacy),null);
 });
+
+test('an invoice number cannot appear twice in one reconciliation or across reconciliations', () => {
+  const twice=state(batch('2024-02-29',[row('A1'),row('a1 ')]));
+  assert.match(validateReconciliationChange(twice,state(batch('2024-02-29')))!,/A1.*only once/);
+  const before=state(batch('2024-02-28',[row('B1')]),batch('2024-02-29'));
+  const next=copy(before);next.batches[1].transactions=[row('b1')];
+  assert.match(validateReconciliationChange(next,before)!,/B1.*only once/);
+  const fresh=copy(before);fresh.batches[1].transactions=[row('B2')];
+  assert.equal(validateReconciliationChange(fresh,before),null);
+});
+test('legacy repeated invoice numbers may stay but cannot grow', () => {
+  const legacy=state(batch('2024-02-29',[row('L1'),row('L1')]));
+  assert.equal(validateReconciliationChange(copy(legacy),legacy),null);
+  const grown=copy(legacy);grown.batches.push(batch('2024-03-01',[row('L1')]));
+  assert.match(validateReconciliationChange(grown,legacy)!,/L1.*only once/);
+});
