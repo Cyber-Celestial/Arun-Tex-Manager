@@ -21,7 +21,7 @@ export function WorkflowSteps({ batch }: { batch: Batch }) {
     { label: online.total ? `Bank verified ${online.verified}/${online.total}` : 'No online payments', done: online.verified === online.total },
     { label: 'Locked', done: locked },
   ];
-  return <ol className="workflow-steps" aria-label="Reconciliation progress">
+  return <ol className="workflow-steps" aria-label="B2C progress">
     {steps.map(step => <li key={step.label} className={step.done ? 'workflow-step-done' : ''}><i/>{step.label}</li>)}
   </ol>;
 }

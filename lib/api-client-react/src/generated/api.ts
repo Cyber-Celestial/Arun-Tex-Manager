@@ -376,7 +376,7 @@ export const getUpdateB2cStateUrl = () => {
 }
 
 /**
- * @summary Save B2C reconciliation data
+ * @summary Save B2C data
  */
 export const updateB2cState = async (moduleStateInput: ModuleStateInput, options?: Parameters<typeof customFetch>[1]): Promise<ModuleStateResponse> => {
 
@@ -442,7 +442,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type UpdateB2cStateMutationVariables = {data: BodyType<ModuleStateInput>}
 
     /**
- * @summary Save B2C reconciliation data
+ * @summary Save B2C data
  */
 export const useUpdateB2cState = <TError = ErrorType<ApiError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateB2cState>>, TError,UpdateB2cStateMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -640,7 +640,7 @@ export const getUpdateB2cBankStateUrl = () => {
 }
 
 /**
- * @summary Add HDFC bank statement deposits to one reconciliation (Accounts or Admin)
+ * @summary Add HDFC bank statement deposits to one B2C day (Accounts or Admin)
  */
 export const updateB2cBankState = async (moduleStateInput: ModuleStateInput, options?: Parameters<typeof customFetch>[1]): Promise<ModuleStateResponse> => {
 
@@ -706,7 +706,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type UpdateB2cBankStateMutationVariables = {data: BodyType<ModuleStateInput>}
 
     /**
- * @summary Add HDFC bank statement deposits to one reconciliation (Accounts or Admin)
+ * @summary Add HDFC bank statement deposits to one B2C day (Accounts or Admin)
  */
 export const useUpdateB2cBankState = <TError = ErrorType<ApiError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateB2cBankState>>, TError,UpdateB2cBankStateMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
