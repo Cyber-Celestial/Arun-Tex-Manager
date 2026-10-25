@@ -1,5 +1,7 @@
 import { clerkClient, getAuth } from "@clerk/express";
 import {
+  DeleteB2cDayBody,
+  DeleteB2cDayResponse,
   GetWorkspaceMeResponse,
   GetWorkspaceStateResponse,
   ListWorkspaceUsersResponse,
@@ -16,6 +18,8 @@ import {
   UpdateWorkspaceUserRoleBody,
   UpdateWorkspaceUserRoleParams,
   UpdateWorkspaceUserRoleResponse,
+  UploadB2cDayBody,
+  UploadB2cDayResponse,
 } from "@workspace/api-zod";
 import {
   db,
@@ -28,6 +32,8 @@ import { and, eq, sql } from "drizzle-orm";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { isDeepStrictEqual } from "node:util";
 import { validateDispatchState } from "../lib/dispatch-validation";
+import { removeB2cDay } from "../lib/reconciliation-delete";
+import { applyUpload, type UploadInput } from "../lib/reconciliation-upload";
 import { appendBankRows, sanitizeBankRows, validateB2cRoleChange } from "../lib/reconciliation-bank";
 import { reconciliationDate, validateReconciliationChange } from "../lib/reconciliation-policy";
 import { applyBatchWorkflow, countedCash, settleBatch, type Actor } from "../lib/reconciliation-workflow";
@@ -525,6 +531,8 @@ async function writeModule(
         ? current.b2c.batches
         : [];
     const nextBatches = Array.isArray(data.batches) ? data.batches : [];
+    if (isObject(current?.b2c) && current.b2c.deletions !== undefined) data.deletions = current.b2c.deletions;
+    else delete data.deletions;
     const roleError = validateB2cRoleChange(user.role, data, isObject(current?.b2c) ? current.b2c : {});
     if (roleError) {
       res.status(403).json({ error: roleError });
@@ -690,6 +698,105 @@ router.put("/workspace/data/b2c/bank", async (req, res): Promise<void> => {
     version: updated[0].version,
     data: user.role === "accounts" ? accountsB2cView(b2c) : b2c,
   }));
+});
+
+router.put("/workspace/data/b2c/upload", async (req, res): Promise<void> => {
+  const user = await requireWorkspaceUser(req, res);
+  if (!user) return;
+  if (user.role !== "admin" && user.role !== "billing") {
+    res.status(403).json({ error: "Billing or Admin access is required to upload invoices." });
+    return;
+  }
+  const parsed = UploadB2cDayBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "The upload is not valid." });
+    return;
+  }
+
+  await ensureStateRow();
+  const [current] = await db
+    .select({ b2c: operationsStateTable.b2c, version: operationsStateTable.version })
+    .from(operationsStateTable)
+    .where(eq(operationsStateTable.id, "main"))
+    .limit(1);
+  if (current.version !== parsed.data.expectedVersion) {
+    res.status(409).json({ error: "The workspace changed in another session. Refresh and try again." });
+    return;
+  }
+  const result = applyUpload(
+    isObject(current.b2c) ? current.b2c : {},
+    parsed.data.data as UploadInput,
+    actorOf(user),
+    new Date().toISOString(),
+  );
+  if ("error" in result) {
+    res.status(result.status).json({ error: result.error });
+    return;
+  }
+  const batch = (result.data.batches as JsonObject[])[result.batchIndex];
+  matchOnlinePayments({ batches: [batch] }, user.role);
+  const invalid = validateB2cState({ batches: [batch] });
+  if (invalid) {
+    res.status(400).json({ error: invalid });
+    return;
+  }
+
+  const updated = await db
+    .update(operationsStateTable)
+    .set({ b2c: result.data, version: sql`${operationsStateTable.version} + 1` })
+    .where(and(eq(operationsStateTable.id, "main"), eq(operationsStateTable.version, parsed.data.expectedVersion)))
+    .returning({ version: operationsStateTable.version });
+  if (!updated[0]) {
+    res.status(409).json({ error: "The workspace changed in another session. Refresh and try again." });
+    return;
+  }
+  res.json(UploadB2cDayResponse.parse({ version: updated[0].version, data: result.data }));
+});
+
+router.put("/workspace/data/b2c/delete", async (req, res): Promise<void> => {
+  const user = await requireWorkspaceUser(req, res);
+  if (!user) return;
+  if (user.role !== "admin") {
+    res.status(403).json({ error: "Admin access is required to delete a B2C day." });
+    return;
+  }
+  const parsed = DeleteB2cDayBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Choose a valid date to delete." });
+    return;
+  }
+
+  await ensureStateRow();
+  const [current] = await db
+    .select({ b2c: operationsStateTable.b2c, version: operationsStateTable.version })
+    .from(operationsStateTable)
+    .where(eq(operationsStateTable.id, "main"))
+    .limit(1);
+  if (current.version !== parsed.data.expectedVersion) {
+    res.status(409).json({ error: "The workspace changed in another session. Refresh and try again." });
+    return;
+  }
+  const result = removeB2cDay(
+    isObject(current.b2c) ? current.b2c : {},
+    parsed.data.data.date,
+    { userId: user.userId, name: user.name },
+    new Date().toISOString(),
+  );
+  if ("error" in result) {
+    res.status(result.error.startsWith("There is no") ? 404 : 400).json({ error: result.error });
+    return;
+  }
+
+  const updated = await db
+    .update(operationsStateTable)
+    .set({ b2c: result.data, version: sql`${operationsStateTable.version} + 1` })
+    .where(and(eq(operationsStateTable.id, "main"), eq(operationsStateTable.version, parsed.data.expectedVersion)))
+    .returning({ version: operationsStateTable.version });
+  if (!updated[0]) {
+    res.status(409).json({ error: "The workspace changed in another session. Refresh and try again." });
+    return;
+  }
+  res.json(DeleteB2cDayResponse.parse({ version: updated[0].version, data: result.data }));
 });
 
 router.put("/workspace/data/dispatch", async (req, res): Promise<void> => {

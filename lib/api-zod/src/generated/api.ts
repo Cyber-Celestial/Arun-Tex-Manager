@@ -66,6 +66,42 @@ export const UpdateB2cStateResponse = zod.object({
 
 
 /**
+ * @summary Upload one day of Vastra B2C invoices; the date comes from the file (Billing or Admin)
+ */
+export const uploadB2cDayBodyExpectedVersionMin = 0;
+
+
+
+export const UploadB2cDayBody = zod.object({
+  "expectedVersion": zod.number().int().min(uploadB2cDayBodyExpectedVersionMin),
+  "data": zod.record(zod.string(), zod.unknown())
+})
+
+export const UploadB2cDayResponse = zod.object({
+  "version": zod.number().int(),
+  "data": zod.record(zod.string(), zod.unknown())
+})
+
+
+/**
+ * @summary Delete one B2C day (Admin)
+ */
+export const deleteB2cDayBodyExpectedVersionMin = 0;
+
+
+
+export const DeleteB2cDayBody = zod.object({
+  "expectedVersion": zod.number().int().min(deleteB2cDayBodyExpectedVersionMin),
+  "data": zod.record(zod.string(), zod.unknown())
+})
+
+export const DeleteB2cDayResponse = zod.object({
+  "version": zod.number().int(),
+  "data": zod.record(zod.string(), zod.unknown())
+})
+
+
+/**
  * @summary Add HDFC bank statement deposits to one reconciliation (Accounts or Admin)
  */
 export const updateB2cBankStateBodyExpectedVersionMin = 0;

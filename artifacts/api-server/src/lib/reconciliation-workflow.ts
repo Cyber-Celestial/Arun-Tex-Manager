@@ -69,7 +69,7 @@ function describeChanges(old: RecordValue | undefined, next: RecordValue): strin
     ? [...changes.slice(0, MAX_LOGGED_CHANGES), `…and ${changes.length - MAX_LOGGED_CHANGES} more changes`] : changes;
 }
 
-function logEntry(action: string, actor: Actor, now: string, changes?: string[]): LogEntry {
+export function logEntry(action: string, actor: Actor, now: string, changes?: string[]): LogEntry {
   return { at: now, userId: actor.userId, name: actor.name, role: actor.role, action, ...(changes?.length ? { changes } : {}) };
 }
 

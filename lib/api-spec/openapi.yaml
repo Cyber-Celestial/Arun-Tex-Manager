@@ -106,6 +106,84 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+  /workspace/data/b2c/upload:
+    put:
+      operationId: uploadB2cDay
+      tags: [workspace]
+      summary: Upload one day of Vastra B2C invoices; the date comes from the file (Billing or Admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModuleStateInput"
+      responses:
+        "200":
+          description: Updated B2C state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModuleStateResponse"
+        "400":
+          description: Invalid rows or date
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Billing or Admin role required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Day already uploaded, locked, duplicate invoice number or workspace changed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /workspace/data/b2c/delete:
+    put:
+      operationId: deleteB2cDay
+      tags: [workspace]
+      summary: Delete one B2C day (Admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModuleStateInput"
+      responses:
+        "200":
+          description: Updated B2C state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModuleStateResponse"
+        "400":
+          description: Invalid date
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Admin role required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: No B2C on that date
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Workspace changed in another session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
   /workspace/data/b2c/bank:
     put:
       operationId: updateB2cBankState

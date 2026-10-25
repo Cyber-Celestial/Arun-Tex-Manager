@@ -455,6 +455,182 @@ export const useUpdateB2cState = <TError = ErrorType<ApiError>,
       return useMutation(getUpdateB2cStateMutationOptions(options), queryClient);
     }
 
+export const getUploadB2cDayUrl = () => {
+
+
+
+
+  return `/api/workspace/data/b2c/upload`
+}
+
+/**
+ * @summary Upload one day of Vastra B2C invoices; the date comes from the file (Billing or Admin)
+ */
+export const uploadB2cDay = async (moduleStateInput: ModuleStateInput, options?: Parameters<typeof customFetch>[1]): Promise<ModuleStateResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ModuleStateResponse>(getUploadB2cDayUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(moduleStateInput)
+  }
+);}
+
+
+
+
+
+export const getUploadB2cDayMutationKey = () => ['uploadB2cDay'] as const;
+
+export const getUploadB2cDayMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadB2cDay>>, TError,UploadB2cDayMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof uploadB2cDay>>, TError,UploadB2cDayMutationVariables, TContext> => {
+
+const mutationKey = getUploadB2cDayMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof uploadB2cDay>>, UploadB2cDayMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  uploadB2cDay(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UploadB2cDayMutationResult = NonNullable<Awaited<ReturnType<typeof uploadB2cDay>>>
+    export type UploadB2cDayMutationBody = BodyType<ModuleStateInput>
+    export type UploadB2cDayMutationError = ErrorType<ApiError>
+    export type UploadB2cDayMutationVariables = {data: BodyType<ModuleStateInput>}
+
+    /**
+ * @summary Upload one day of Vastra B2C invoices; the date comes from the file (Billing or Admin)
+ */
+export const useUploadB2cDay = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadB2cDay>>, TError,UploadB2cDayMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof uploadB2cDay>>,
+        TError,
+        UploadB2cDayMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUploadB2cDayMutationOptions(options), queryClient);
+    }
+
+export const getDeleteB2cDayUrl = () => {
+
+
+
+
+  return `/api/workspace/data/b2c/delete`
+}
+
+/**
+ * @summary Delete one B2C day (Admin)
+ */
+export const deleteB2cDay = async (moduleStateInput: ModuleStateInput, options?: Parameters<typeof customFetch>[1]): Promise<ModuleStateResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ModuleStateResponse>(getDeleteB2cDayUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(moduleStateInput)
+  }
+);}
+
+
+
+
+
+export const getDeleteB2cDayMutationKey = () => ['deleteB2cDay'] as const;
+
+export const getDeleteB2cDayMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteB2cDay>>, TError,DeleteB2cDayMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteB2cDay>>, TError,DeleteB2cDayMutationVariables, TContext> => {
+
+const mutationKey = getDeleteB2cDayMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteB2cDay>>, DeleteB2cDayMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  deleteB2cDay(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteB2cDayMutationResult = NonNullable<Awaited<ReturnType<typeof deleteB2cDay>>>
+    export type DeleteB2cDayMutationBody = BodyType<ModuleStateInput>
+    export type DeleteB2cDayMutationError = ErrorType<ApiError>
+    export type DeleteB2cDayMutationVariables = {data: BodyType<ModuleStateInput>}
+
+    /**
+ * @summary Delete one B2C day (Admin)
+ */
+export const useDeleteB2cDay = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteB2cDay>>, TError,DeleteB2cDayMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deleteB2cDay>>,
+        TError,
+        DeleteB2cDayMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDeleteB2cDayMutationOptions(options), queryClient);
+    }
+
 export const getUpdateB2cBankStateUrl = () => {
 
 
