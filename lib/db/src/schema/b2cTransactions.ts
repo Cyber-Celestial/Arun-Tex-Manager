@@ -23,7 +23,6 @@ export const b2cTransactionsTable = pgTable(
     upiAmount: money("upi_amount").notNull().default(0),
     cardAmount: money("card_amount").notNull().default(0),
     bankVerified: boolean("bank_verified").notNull().default(false),
-    bankTransactionId: text("bank_transaction_id"),
   },
   (table) => [
     check("b2c_transactions_type_check", sql`${table.type} in ('Invoice', 'Return')`),

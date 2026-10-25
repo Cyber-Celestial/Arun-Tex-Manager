@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
-import { check, numeric, pgTable, serial, text } from "drizzle-orm/pg-core";
+import { check, integer, numeric, pgTable, serial, text } from "drizzle-orm/pg-core";
 import { money } from "./columns";
+import { sundayGroupsTable } from "./sundayGroups";
 
 export const employeeStatuses = ["Active", "Inactive"] as const;
 export type EmployeeStatus = (typeof employeeStatuses)[number];
@@ -19,6 +20,9 @@ export const employeesTable = pgTable(
     accumulatedPto: numeric("accumulated_pto", { precision: 5, scale: 2, mode: "number" })
       .notNull()
       .default(0),
+    sundayGroupId: integer("sunday_group_id").references(() => sundayGroupsTable.groupId, {
+      onDelete: "set null",
+    }),
   },
   (table) => [
     check("employees_status_check", sql`${table.status} in ('Active', 'Inactive')`),
