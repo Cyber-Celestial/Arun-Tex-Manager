@@ -455,6 +455,94 @@ export const useUpdateB2cState = <TError = ErrorType<ApiError>,
       return useMutation(getUpdateB2cStateMutationOptions(options), queryClient);
     }
 
+export const getUpdateB2cBankStateUrl = () => {
+
+
+
+
+  return `/api/workspace/data/b2c/bank`
+}
+
+/**
+ * @summary Add HDFC bank statement deposits to one reconciliation (Accounts or Admin)
+ */
+export const updateB2cBankState = async (moduleStateInput: ModuleStateInput, options?: Parameters<typeof customFetch>[1]): Promise<ModuleStateResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ModuleStateResponse>(getUpdateB2cBankStateUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(moduleStateInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateB2cBankStateMutationKey = () => ['updateB2cBankState'] as const;
+
+export const getUpdateB2cBankStateMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateB2cBankState>>, TError,UpdateB2cBankStateMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateB2cBankState>>, TError,UpdateB2cBankStateMutationVariables, TContext> => {
+
+const mutationKey = getUpdateB2cBankStateMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateB2cBankState>>, UpdateB2cBankStateMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  updateB2cBankState(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateB2cBankStateMutationResult = NonNullable<Awaited<ReturnType<typeof updateB2cBankState>>>
+    export type UpdateB2cBankStateMutationBody = BodyType<ModuleStateInput>
+    export type UpdateB2cBankStateMutationError = ErrorType<ApiError>
+    export type UpdateB2cBankStateMutationVariables = {data: BodyType<ModuleStateInput>}
+
+    /**
+ * @summary Add HDFC bank statement deposits to one reconciliation (Accounts or Admin)
+ */
+export const useUpdateB2cBankState = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateB2cBankState>>, TError,UpdateB2cBankStateMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateB2cBankState>>,
+        TError,
+        UpdateB2cBankStateMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUpdateB2cBankStateMutationOptions(options), queryClient);
+    }
+
 export const getUpdateDispatchStateUrl = () => {
 
 
