@@ -1,0 +1,12 @@
+.workflow-steps { display:flex; flex-wrap:wrap; gap:6px 14px; margin:0; padding:0; list-style:none; font:600 10px var(--app-font-mono); letter-spacing:.04em; color:#8a8f86; }
+.workflow-steps li { display:inline-flex; align-items:center; gap:6px; }
+.workflow-steps i { width:8px; height:8px; border-radius:50%; border:1.5px solid #c8c6b8; }
+.workflow-step-done { color:#3f775b; }
+.workflow-step-done i { background:#4f876d; border-color:#4f876d; }
+.change-log { border:1px solid #e8e3d6; border-radius:10px; background:#fffdf8; padding:10px 14px; font-size:12px; color:#4a5551; }
+.change-log summary { cursor:pointer; font:600 10px var(--app-font-mono); letter-spacing:.12em; text-transform:uppercase; color:#6f7a72; }
+.change-log > ul { margin:10px 0 0; padding:0; list-style:none; display:grid; gap:10px; max-height:320px; overflow-y:auto; }
+.change-log > ul > li > div { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 12px; }
+.change-log strong { color:#34403c; }
+.change-log span, .change-log time { font-size:11px; color:#8a8f86; }
+.change-log-changes { margin:4px 0 0; padding-left:18px; color:#5d6862; font-size:11px; }

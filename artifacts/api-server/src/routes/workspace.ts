@@ -30,6 +30,7 @@ import { isDeepStrictEqual } from "node:util";
 import { validateDispatchState } from "../lib/dispatch-validation";
 import { appendBankRows, sanitizeBankRows, validateB2cRoleChange } from "../lib/reconciliation-bank";
 import { reconciliationDate, validateReconciliationChange } from "../lib/reconciliation-policy";
+import { applyBatchWorkflow, countedCash, settleBatch, type Actor } from "../lib/reconciliation-workflow";
 
 const router: IRouter = Router();
 
@@ -141,15 +142,6 @@ async function ensureStateRow(): Promise<void> {
     .onConflictDoNothing();
 }
 
-function cashDenominationTotal(denominations: unknown): number {
-  if (!isObject(denominations)) return 0;
-  const notes = [500, 200, 100, 50, 20, 10, 5, 2, 1];
-  return notes.reduce((sum, value) => {
-    const count = Number(denominations[String(value)] ?? 0);
-    return sum + (Number.isFinite(count) && count > 0 ? value * count : 0);
-  }, 0);
-}
-
 function classifyBankMode(row: JsonObject): "UPI" | "CARD" | null {
   const mode = String(row.mode ?? "").toUpperCase();
   if (mode.includes("UPI")) return "UPI";
@@ -231,6 +223,7 @@ function validateB2cState(data: JsonObject): string | null {
     }
     let cashSales = 0;
     let returns = 0;
+    const cashClosed = batch.status === "Submitted" || batch.billingSubmitted === true;
     for (const transactionValue of batch.transactions) {
       if (!isObject(transactionValue)) return "A transaction is not valid.";
       const transaction = transactionValue;
@@ -248,7 +241,7 @@ function validateB2cState(data: JsonObject): string | null {
       if (![cash, upi, card].every((part) => Number.isFinite(part) && part >= 0)) {
         return "Payment amounts must be valid, non-negative numbers.";
       }
-      if (batch.status === "Submitted") {
+      if (cashClosed) {
         if (
           transaction.paymentMode === "SPLIT" &&
           Math.round((cash + upi + card) * 100) !== Math.round(amount * 100)
@@ -277,8 +270,8 @@ function validateB2cState(data: JsonObject): string | null {
       cashSales += cash;
     }
 
-    if (batch.status === "Submitted") {
-      const onlineMissing = batch.transactions.some((item) => {
+    if (cashClosed) {
+      const onlineMissing = batch.status === "Submitted" && batch.transactions.some((item) => {
         if (!isObject(item) || item.type === "Return") return false;
         return (
           (Number(item.upiAmount ?? 0) > 0 ||
@@ -290,7 +283,7 @@ function validateB2cState(data: JsonObject): string | null {
         return "Online payments must be bank-verified before the day is submitted.";
       }
       const expectedCash = Math.round((cashSales - returns) * 100);
-      const enteredCash = Math.round(cashDenominationTotal(batch.denominations) * 100);
+      const enteredCash = Math.round(countedCash(batch.denominations) * 100);
       if (expectedCash !== enteredCash) {
         return "Cash denominations must exactly match cash sales less returns.";
       }
@@ -352,6 +345,8 @@ function accountsB2cView(b2c: JsonObject): JsonObject {
         id: record.id,
         date: record.date,
         status: record.status,
+        billingSubmitted: record.billingSubmitted,
+        adminApproved: record.adminApproved,
         transactions: record.transactions,
         bankRows: record.bankRows,
         invoiceImport: record.invoiceImport,
@@ -404,6 +399,10 @@ function applyRoleProjection(
     dispatch,
     hr,
   };
+}
+
+function actorOf(user: WorkspaceUser): Actor {
+  return { userId: user.userId, name: user.name, role: user.role };
 }
 
 function activeRole(role: WorkspaceRole): boolean {
@@ -548,6 +547,11 @@ async function writeModule(
       });
       return;
     }
+    const workflowError = applyBatchWorkflow(nextBatches, currentBatches, actorOf(user), new Date().toISOString());
+    if (workflowError) {
+      res.status(workflowError.status).json({ error: workflowError.error });
+      return;
+    }
   }
   const whereVersion = and(
     eq(operationsStateTable.id, "main"),
@@ -671,6 +675,7 @@ router.put("/workspace/data/b2c/bank", async (req, res): Promise<void> => {
   }
   batch.bankRows = appendBankRows(batch.bankRows, incoming).rows;
   matchOnlinePayments({ batches: [batch] }, user.role);
+  settleBatch(batch, actorOf(user), new Date().toISOString());
 
   const updated = await db
     .update(operationsStateTable)
