@@ -256,6 +256,48 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+  /workspace/data/dispatch/delete:
+    put:
+      operationId: deleteDispatchDay
+      tags: [workspace]
+      summary: Delete every B2B dispatch invoice dated on one day (Admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModuleStateInput"
+      responses:
+        "200":
+          description: Dispatch data after the day was removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModuleStateResponse"
+        "400":
+          description: Invalid date
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Admin role required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: No dispatch invoices on that date
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Workspace state changed in another session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
   /workspace/data/hr:
     put:
       operationId: updateHrState

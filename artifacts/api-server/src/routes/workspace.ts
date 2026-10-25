@@ -2,6 +2,8 @@ import { clerkClient, getAuth } from "@clerk/express";
 import {
   DeleteB2cDayBody,
   DeleteB2cDayResponse,
+  DeleteDispatchDayBody,
+  DeleteDispatchDayResponse,
   GetWorkspaceMeResponse,
   GetWorkspaceStateResponse,
   ListWorkspaceUsersResponse,
@@ -34,6 +36,7 @@ import { isDeepStrictEqual } from "node:util";
 import { validateDispatchState } from "../lib/dispatch-validation";
 import { removeB2cDay } from "../lib/reconciliation-delete";
 import { applyUpload, type UploadInput } from "../lib/reconciliation-upload";
+import { removeDispatchDay } from "../lib/dispatch-delete";
 import { appendBankRows, sanitizeBankRows, validateB2cRoleChange } from "../lib/reconciliation-bank";
 import { reconciliationDate, validateReconciliationChange } from "../lib/reconciliation-policy";
 import { applyBatchWorkflow, countedCash, settleBatch, type Actor } from "../lib/reconciliation-workflow";
@@ -807,6 +810,52 @@ router.put("/workspace/data/dispatch", async (req, res): Promise<void> => {
     UpdateDispatchStateBody,
     UpdateDispatchStateResponse,
   );
+});
+
+router.put("/workspace/data/dispatch/delete", async (req, res): Promise<void> => {
+  const user = await requireWorkspaceUser(req, res);
+  if (!user) return;
+  if (user.role !== "admin") {
+    res.status(403).json({ error: "Admin access is required to delete dispatch invoices." });
+    return;
+  }
+  const parsed = DeleteDispatchDayBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Choose a valid date to delete." });
+    return;
+  }
+
+  await ensureStateRow();
+  const [current] = await db
+    .select({ dispatch: operationsStateTable.dispatch, version: operationsStateTable.version })
+    .from(operationsStateTable)
+    .where(eq(operationsStateTable.id, "main"))
+    .limit(1);
+  if (current.version !== parsed.data.expectedVersion) {
+    res.status(409).json({ error: "The workspace changed in another session. Refresh and try again." });
+    return;
+  }
+  const result = removeDispatchDay(
+    isObject(current.dispatch) ? current.dispatch : {},
+    parsed.data.data.date,
+    { userId: user.userId, name: user.name },
+    new Date().toISOString(),
+  );
+  if ("error" in result) {
+    res.status(result.error.startsWith("There are no") ? 404 : 400).json({ error: result.error });
+    return;
+  }
+
+  const updated = await db
+    .update(operationsStateTable)
+    .set({ dispatch: result.data, version: sql`${operationsStateTable.version} + 1` })
+    .where(and(eq(operationsStateTable.id, "main"), eq(operationsStateTable.version, parsed.data.expectedVersion)))
+    .returning({ version: operationsStateTable.version });
+  if (!updated[0]) {
+    res.status(409).json({ error: "The workspace changed in another session. Refresh and try again." });
+    return;
+  }
+  res.json(DeleteDispatchDayResponse.parse({ version: updated[0].version, data: result.data }));
 });
 
 router.put("/workspace/data/hr", async (req, res): Promise<void> => {

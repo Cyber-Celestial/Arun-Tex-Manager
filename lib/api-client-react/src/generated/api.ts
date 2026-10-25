@@ -807,6 +807,94 @@ export const useUpdateDispatchState = <TError = ErrorType<ApiError>,
       return useMutation(getUpdateDispatchStateMutationOptions(options), queryClient);
     }
 
+export const getDeleteDispatchDayUrl = () => {
+
+
+
+
+  return `/api/workspace/data/dispatch/delete`
+}
+
+/**
+ * @summary Delete every B2B dispatch invoice dated on one day (Admin)
+ */
+export const deleteDispatchDay = async (moduleStateInput: ModuleStateInput, options?: Parameters<typeof customFetch>[1]): Promise<ModuleStateResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ModuleStateResponse>(getDeleteDispatchDayUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(moduleStateInput)
+  }
+);}
+
+
+
+
+
+export const getDeleteDispatchDayMutationKey = () => ['deleteDispatchDay'] as const;
+
+export const getDeleteDispatchDayMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDispatchDay>>, TError,DeleteDispatchDayMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteDispatchDay>>, TError,DeleteDispatchDayMutationVariables, TContext> => {
+
+const mutationKey = getDeleteDispatchDayMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteDispatchDay>>, DeleteDispatchDayMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  deleteDispatchDay(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteDispatchDayMutationResult = NonNullable<Awaited<ReturnType<typeof deleteDispatchDay>>>
+    export type DeleteDispatchDayMutationBody = BodyType<ModuleStateInput>
+    export type DeleteDispatchDayMutationError = ErrorType<ApiError>
+    export type DeleteDispatchDayMutationVariables = {data: BodyType<ModuleStateInput>}
+
+    /**
+ * @summary Delete every B2B dispatch invoice dated on one day (Admin)
+ */
+export const useDeleteDispatchDay = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDispatchDay>>, TError,DeleteDispatchDayMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deleteDispatchDay>>,
+        TError,
+        DeleteDispatchDayMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDeleteDispatchDayMutationOptions(options), queryClient);
+    }
+
 export const getUpdateHrStateUrl = () => {
 
 
