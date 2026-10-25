@@ -18,7 +18,7 @@ import NotFound from '@/pages/not-found';
 import {
   getGetWorkspaceMeQueryKey, getGetWorkspaceStateQueryKey, getListWorkspaceUsersQueryKey, useGetWorkspaceMe,
   useGetWorkspaceState, useListWorkspaceUsers, useRequestUploadUrl, useUpdateAttendanceState,
-  useUpdateB2cState, useUpdateDispatchState, useUpdateHrState,
+  useUpdateB2cBankState, useUpdateB2cState, useUpdateDispatchState, useUpdateHrState,
   useUpdateWorkspaceUserRole,
 } from '@workspace/api-client-react';
 import type { WorkspaceState, WorkspaceUser } from '@workspace/api-client-react';
@@ -225,10 +225,11 @@ function useWorkspace() {
   const me = useGetWorkspaceMe({ query: { queryKey: getGetWorkspaceMeQueryKey() } });
   const qc = useQueryClient();
   const b2c = useUpdateB2cState({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,b2c:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); }, onError:()=>qc.invalidateQueries({queryKey:getGetWorkspaceStateQueryKey()}) } });
+  const b2cBank = useUpdateB2cBankState({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,b2c:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); }, onError:()=>qc.invalidateQueries({queryKey:getGetWorkspaceStateQueryKey()}) } });
   const dispatch = useUpdateDispatchState({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,dispatch:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); }, onError:()=>{void qc.invalidateQueries({queryKey:getGetWorkspaceStateQueryKey()});} } });
   const hr = useUpdateHrState({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,hr:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); } } });
   const attendance = useUpdateAttendanceState({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,hr:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); } } });
-  return { query, me, b2c, dispatch, hr, attendance };
+  return { query, me, b2c, b2cBank, dispatch, hr, attendance };
 }
 function LoadingView() { return <div className="loading-view"><div className="skeleton skeleton-title"/><div className="skeleton-row">{[1,2,3,4].map(i=><div className="skeleton skeleton-card" key={i}/>)}</div><div className="skeleton skeleton-table"/></div>; }
 function LoadError({ retry }: { retry: () => void }) { return <div className="error-state"><CircleAlert size={24}/><h2>Workspace data did not load</h2><p>Check the connection, then try again. No changes have been made.</p><div className="error-actions"><Button kind="primary" onClick={retry}>Try again</Button><Link href="/sign-in" className="text-link">Sign in to workspace</Link></div></div>; }
@@ -287,7 +288,8 @@ export function Overview({ state }: { state: WorkspaceState }) {
   </div>;
 }
 
-function Reconciliation({ state, canEdit, role, save }: { state: AnyObj; canEdit: boolean; role: Role; save: (data: AnyObj)=>Promise<unknown> }) {
+function Reconciliation({ state, canEdit, role, save, saveBank }: { state: AnyObj; canEdit: boolean; role: Role; save: (data: AnyObj)=>Promise<unknown>; saveBank: (data: AnyObj)=>Promise<unknown> }) {
+  const canBank = role==='admin'||role==='accounts';
   const [selected, setSelected] = useState(() => {
     const requested = new URLSearchParams(window.location.search).get('date');
     const index = arr(state.batches).findIndex(batch => businessDate(batch.date) === requested);
@@ -315,23 +317,13 @@ function Reconciliation({ state, canEdit, role, save }: { state: AnyObj; canEdit
     if (day) url.searchParams.set('date',day);
     window.history.replaceState(window.history.state,'',`${url.pathname}${url.search}${url.hash}`);
   };
-  const runAction = async (action:()=>Promise<unknown>, success?:string) => {
-    if (busyRef.current || !canEdit) return false;
+  const runAction = async (action:()=>Promise<unknown>, success?:string, allowed=canEdit) => {
+    if (busyRef.current || !allowed) return false;
     busyRef.current=true; setBusy(true); setSaveError('');
     try { await action(); if(success)setImportMessage(success); return true; }
     catch(error:any) { setImportMessage(''); setSaveError(error?.data?.error || error?.message || 'Save failed. Your draft has been kept. Try again.'); return false; }
     finally { busyRef.current=false; setBusy(false); }
   };
-  if (role === 'accounts') return <div className="page-stack">
-    <PageIntro eyebrow="ACCOUNTS · TALLY EXPORTS" title="Finalized day closes." description="Download the export generated when Billing submitted each reconciled batch."/>
-    <Panel><PanelHeading kicker="APPROVED EXPORTS" title="Tally workbooks"/>
-      {batches.filter(batch => batch.status === 'Submitted' && batch.tallyExport).length
-        ? <div className="table-wrap"><table><thead><tr><th>BUSINESS DATE</th><th>STATUS</th><th>LINES</th><th>EXPORT</th></tr></thead><tbody>
-          {batches.filter(batch => batch.status === 'Submitted' && batch.tallyExport).map((batch, i) => <tr key={i}><td>{reconciliationLabel(batch.date)}</td><td><StatusPill tone="good">Finalized</StatusPill></td><td>{arr(batch.tallyExport.entries).length}</td><td><Button kind="primary" onClick={() => downloadTallyWorkbook(batch.tallyExport, String(batch.date || 'batch').slice(0, 10))}><FileDown size={14}/> Download Excel</Button></td></tr>)}
-        </tbody></table></div>
-        : <TableEmpty text="No finalized Tally exports are available yet."/>}
-    </Panel>
-  </div>;
   const update = (next: AnyObj) => runAction(()=>save({ ...state, batches: batches.map((b,i)=>i===selected ? next : b) }));
   const addBatch = async () => {
     const day=businessDate(newBatchDate);
@@ -396,7 +388,7 @@ function Reconciliation({ state, canEdit, role, save }: { state: AnyObj; canEdit
       await saveInvoiceImport(draft);
     }); };
   const importBankFile = () => document.getElementById('bank-import')?.click();
-  const handleBankImport = (file?:File) => { if(!file || !hasBatch || active.status==='Submitted')return; setImportMessage('Reading bank statement…'); void runAction(async()=>{
+  const handleBankImport = (file?:File) => { if(!file || !canBank || !hasBatch || active.status==='Submitted')return; setImportMessage('Reading bank statement…'); void runAction(async()=>{
       const workbook=XLSX.read(await file.arrayBuffer(),{type:'array',cellDates:true}); const imported:AnyObj[]=[];
       for(const sheetName of workbook.SheetNames) {
         const matrix=XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[sheetName],{header:1,defval:''}) as unknown[][];
@@ -415,9 +407,11 @@ function Reconciliation({ state, canEdit, role, save }: { state: AnyObj; canEdit
         }
       }
       if(!imported.length){setImportMessage('No deposit rows found. Use an HDFC statement with Date, Narration and Deposit Amt. columns.');return;}
-      await save({...state,batches:batches.map((batch,i)=>i===selected?{...active,bankRows:[...bankRows,...imported]}:batch)});
-      setImportMessage(`${imported.length} bank deposits saved for matching.`);
-  }); };
+      const dated=imported.filter(row=>row.date); const skipped=imported.length-dated.length;
+      if(!dated.length){setImportMessage('No deposit rows had a readable date. Nothing was uploaded.');return;}
+      await saveBank({batchIndex:selected,date:businessDate(active.date),rows:dated});
+      setImportMessage(`${dated.length} bank deposits uploaded and matched against invoices.${skipped?` ${skipped} rows without a readable date were skipped.`:''}`);
+  },undefined,canBank); };
   const setDenom=(key:string,value:number)=>update({...active,denominations:{...active.denominations,[key]:value}});
   const total = tx.reduce((s,t)=>s+Number(t.totalInvoiceAmount||0),0);
   const expectedCash = tx.reduce((s,t)=>s+(t.type==='Return'?-Math.abs(Number(t.totalInvoiceAmount)||0):Number(t.cashAmount||0)),0);
@@ -426,22 +420,23 @@ function Reconciliation({ state, canEdit, role, save }: { state: AnyObj; canEdit
   const submitBatch = () => update({...active,status:'Submitted',tallyExport:makeTallyExport(active)});
   const pending = tx.filter(t=>!t.bankVerified && ['UPI','CARD','SPLIT'].includes(t.paymentMode));
   const batchEditable=canEdit&&hasBatch&&active.status!=='Submitted'&&!busy;
+  const bankEditable=canBank&&hasBatch&&active.status!=='Submitted'&&!busy;
   const matchInvoice = (invoiceNumber:string, rowIndex:number) => { const rows=[...bankRows]; rows[rowIndex]={...rows[rowIndex],matchedInvoiceNumber:invoiceNumber}; update({...active,bankRows:rows}); };
   return <div className="page-stack">
-    <PageIntro eyebrow="VASTRA B2C · SALES CONTROL" title="Reconciliation" description="Choose any business date. Upload its invoice workbook once, then finish matching and cash close." actions={<><input id="sales-import" type="file" accept=".csv,.txt,.xls,.xlsx" disabled={!batchEditable||uploaded} hidden onChange={e=>{handleImport(e.target.files?.[0]);e.target.value='';}}/><Button onClick={importFile} disabled={!batchEditable||uploaded}><FileSpreadsheet size={15}/> Import Vastra workbook</Button><Button kind="primary" onClick={exportTally} disabled={active.status!=='Submitted'||!active.tallyExport}><FileDown size={15}/> Export Tally Excel</Button></>}/>
+    <PageIntro eyebrow="VASTRA B2C · SALES CONTROL" title="Reconciliation" description={role==='accounts'?'Pick a business date, upload its HDFC statement and review which online payments matched.':'Choose any business date. Upload its invoice workbook once, then finish matching and cash close.'} actions={<>{canEdit&&<><input id="sales-import" type="file" accept=".csv,.txt,.xls,.xlsx" disabled={!batchEditable||uploaded} hidden onChange={e=>{handleImport(e.target.files?.[0]);e.target.value='';}}/><Button onClick={importFile} disabled={!batchEditable||uploaded}><FileSpreadsheet size={15}/> Import Vastra workbook</Button></>}<Button kind="primary" onClick={exportTally} disabled={active.status!=='Submitted'||!active.tallyExport}><FileDown size={15}/> Export Tally Excel</Button></>}/>
     {importMessage&&<div className="recon-footnote" role="status">{importMessage}</div>}
     {saveError&&<div className="recon-error" role="alert">{saveError} {pendingImport&&<button type="button" className="btn btn-secondary" disabled={busy} onClick={()=>void runAction(()=>saveInvoiceImport(pendingImport))}>Retry invoice save</button>}</div>}
     {duplicateDays.length>0&&<div className="recon-error" role="status">Legacy duplicate dates: {duplicateDays.map(reconciliationLabel).join(', ')}. Existing records are preserved; no additional reconciliation upload is allowed for an already uploaded date.</div>}
-    <div className="recon-date-create"><label htmlFor="reconciliation-date">CREATE OR OPEN DATE</label><input id="reconciliation-date" data-testid="input-reconciliation-date" aria-label="Reconciliation business date" type="date" value={newBatchDate} disabled={!canEdit||busy} onChange={event=>setNewBatchDate(event.target.value)}/><Button kind="primary" onClick={()=>void addBatch()} disabled={!canEdit||busy||!businessDate(newBatchDate)}>{batches.some(batch=>businessDate(batch.date)===businessDate(newBatchDate))?'Open existing reconciliation':'+ Create reconciliation'}</Button><small>Any past date · One invoice upload per date</small></div>
+    {canEdit&&<div className="recon-date-create"><label htmlFor="reconciliation-date">CREATE OR OPEN DATE</label><input id="reconciliation-date" data-testid="input-reconciliation-date" aria-label="Reconciliation business date" type="date" value={newBatchDate} disabled={!canEdit||busy} onChange={event=>setNewBatchDate(event.target.value)}/><Button kind="primary" onClick={()=>void addBatch()} disabled={!canEdit||busy||!businessDate(newBatchDate)}>{batches.some(batch=>businessDate(batch.date)===businessDate(newBatchDate))?'Open existing reconciliation':'+ Create reconciliation'}</Button><small>Any past date · One invoice upload per date</small></div>}
     <div className="recon-toolbar"><div className="batch-switch"><label htmlFor="active-reconciliation">ACTIVE BATCH</label><select id="active-reconciliation" value={String(selected)} disabled={busy} onChange={e=>selectBatch(Number(e.target.value))} data-testid="select-active-batch">{batches.length ? batches.map((b,i)=><option key={b.id||i} value={i}>{reconciliationLabel(b.date)} · {b.status || 'Open'}{duplicateDays.includes(businessDate(b.date))?` · Legacy ${i+1}`:''}</option>) : <option value="0">No batches yet</option>}</select></div><span className="toolbar-divider"/><div className="batch-meta"><span className="green-dot"/><span>{busy?'Saving / reading…':hasBatch?`${tx.length} transactions loaded`:'Create a dated reconciliation to begin'}</span><span className="meta-sep">·</span><span className="mono">BATCH {String(selected+1).padStart(2,'0')}</span></div></div>
     {uploaded&&<div className="recon-footnote" role="status"><ShieldCheck size={16}/><span>Invoice workbook already uploaded for <strong>{reconciliationLabel(active.date)}</strong>. A second upload is not allowed. Bank matching and payment adjustments remain available until submission.</span></div>}
-    <div className="metric-grid compact-grid"><Metric label="Invoice value" value={money(total)} note={`${tx.length} sales and returns`} icon={FileText}/><Metric label="Cash expected" value={money(expectedCash)} note="From payment allocations" icon={Banknote} color="gold"/><Metric label="Cash counted" value={money(denomTotal)} note={denomTotal===expectedCash?'Denominations balance':'Denominations need review'} icon={ClipboardCheck} color={denomTotal===expectedCash?'teal':'rose'}/><Metric label="Bank exceptions" value={`${pending.length}`} note="Card, UPI and split payments" icon={CircleAlert} color="rose"/></div>
-    <Panel className="recon-panel"><div className="tabs">{['Transactions','Bank matching','Denominations'].map(t=><button key={t} onClick={()=>setTab(t)} className={`tab ${tab===t?'tab-active':''}`} data-testid={`tab-${t.toLowerCase().replace(' ','-')}`}>{t}{t==='Bank matching'&&<span className="tab-count">{pending.length}</span>}</button>)}</div>
+    <div className="metric-grid compact-grid"><Metric label="Invoice value" value={money(total)} note={`${tx.length} sales and returns`} icon={FileText}/><Metric label="Cash expected" value={money(expectedCash)} note="From payment allocations" icon={Banknote} color="gold"/>{role!=='accounts'&&<Metric label="Cash counted" value={money(denomTotal)} note={denomTotal===expectedCash?'Denominations balance':'Denominations need review'} icon={ClipboardCheck} color={denomTotal===expectedCash?'teal':'rose'}/>}<Metric label="Bank exceptions" value={`${pending.length}`} note="Card, UPI and split payments" icon={CircleAlert} color="rose"/></div>
+    <Panel className="recon-panel"><div className="tabs">{(role==='accounts'?['Transactions','Bank matching']:['Transactions','Bank matching','Denominations']).map(t=><button key={t} onClick={()=>setTab(t)} className={`tab ${tab===t?'tab-active':''}`} data-testid={`tab-${t.toLowerCase().replace(' ','-')}`}>{t}{t==='Bank matching'&&<span className="tab-count">{pending.length}</span>}</button>)}</div>
       {tab==='Transactions' && <><div className="panel-tools"><span className="tool-note"><FileSpreadsheet size={16}/> Vastra invoice register</span><span className="tool-hint">Cash, UPI and card splits must equal each invoice before submission.</span></div>{tx.length ? <div className="table-wrap"><table><thead><tr><th>INVOICE</th><th>DATE</th><th>TYPE</th><th>PAYMENT MODE</th><th>CASH</th><th>UPI</th><th>CARD</th><th className="align-right">INVOICE TOTAL</th></tr></thead><tbody>{tx.map((t,i)=><tr key={`${selected}-${i}-${t.invoiceNumber}`}><td className="strong mono">{t.invoiceNumber || '—'}</td><td>{reconciliationLabel(t.date)}</td><td><StatusPill tone={t.type==='Return'?'bad':'neutral'}>{t.type || 'Invoice'}</StatusPill></td><td><select className="inline-select" value={t.paymentMode || 'CASH'} disabled={!batchEditable} onChange={e=>{const mode=e.target.value,amount=Number(t.totalInvoiceAmount)||0,n=[...tx];n[i]={...t,paymentMode:mode,type:mode==='RETURN'?'Return':'Invoice',cashAmount:mode==='CASH'?amount:0,upiAmount:mode==='UPI'?amount:0,cardAmount:mode==='CARD'?amount:0,bankVerified:mode==='CASH'||mode==='RETURN'};update({...active,transactions:n});}}>{['CASH','CARD','UPI','SPLIT','RETURN'].map(v=><option key={v}>{v}</option>)}</select></td>{['cashAmount','upiAmount','cardAmount'].map(k=><td key={k}><ReconciliationNumberInput label={`${k} ${t.invoiceNumber}`} disabled={!batchEditable||t.type==='Return'} value={Number(t[k] ?? 0)} onCommit={value=>{const n=[...tx];n[i]={...t,[k]:value};void update({...active,transactions:n});}}/></td>)}<td className="align-right mono strong">{money(t.totalInvoiceAmount)}</td></tr>)}</tbody></table></div> : <TableEmpty text="Create a dated reconciliation, then import the Vastra B2C workbook to start matching invoices and payments."/>}</>}
-      {tab==='Bank matching' && <><div className="panel-tools"><span className="tool-note"><Banknote size={16}/> Deposits and invoice references</span><span className="tool-hint">Matching checks date, deposit amount and payment mode.</span><input id="bank-import" type="file" accept=".csv,.txt,.xls,.xlsx" hidden onChange={e=>handleBankImport(e.target.files?.[0])}/><Button onClick={importBankFile} disabled={!batchEditable}><FileSpreadsheet size={14}/> Import HDFC statement</Button></div>{bankRows.length ? <div className="table-wrap"><table><thead><tr><th>DEPOSIT DATE</th><th>NARRATION / REFERENCE</th><th>MODE</th><th>DEPOSIT</th><th>MATCH TO INVOICE</th></tr></thead><tbody>{bankRows.map((r,i)=><tr key={i}><td>{shortDate(r.date)}</td><td><strong>{r.narration || 'Bank deposit'}</strong><small className="sub-cell">{r.reference || 'No reference'}</small></td><td><span className="method-chip">{r.mode || '—'}</span></td><td className="mono">{money(r.depositAmount)}</td><td><select className="inline-select" value={r.matchedInvoiceNumber || ''} disabled={!batchEditable} onChange={e=>{if(e.target.value)matchInvoice(e.target.value,i);else {const rows=[...bankRows];rows[i]={...r,matchedInvoiceNumber:''};update({...active,bankRows:rows});}}}><option value="">Select invoice</option>{tx.map(t=><option key={t.invoiceNumber} value={t.invoiceNumber}>{t.invoiceNumber}</option>)}</select></td></tr>)}</tbody></table></div>:<TableEmpty text="Add bank statement rows to review deposits against invoice payment allocations."/>}</>}
+      {tab==='Bank matching' && <><div className="panel-tools"><span className="tool-note"><Banknote size={16}/> Deposits and invoice references</span><span className="tool-hint">Matching checks date, deposit amount and payment mode.</span>{canBank?<><input id="bank-import" type="file" accept=".csv,.txt,.xls,.xlsx" hidden onChange={e=>{handleBankImport(e.target.files?.[0]);e.target.value='';}}/><Button onClick={importBankFile} disabled={!bankEditable}><FileSpreadsheet size={14}/> Import HDFC statement</Button></>:<span className="tool-hint">Bank statements are uploaded by Accounts or Admin.</span>}</div>{bankRows.length ? <div className="table-wrap"><table><thead><tr><th>DEPOSIT DATE</th><th>NARRATION / REFERENCE</th><th>MODE</th><th>DEPOSIT</th><th>MATCH TO INVOICE</th></tr></thead><tbody>{bankRows.map((r,i)=><tr key={i}><td>{shortDate(r.date)}</td><td><strong>{r.narration || 'Bank deposit'}</strong><small className="sub-cell">{r.reference || 'No reference'}</small></td><td><span className="method-chip">{r.mode || '—'}</span></td><td className="mono">{money(r.depositAmount)}</td><td>{role==='admin'?<select className="inline-select" value={r.matchedInvoiceNumber || ''} disabled={!batchEditable} onChange={e=>{if(e.target.value)matchInvoice(e.target.value,i);else {const rows=[...bankRows];rows[i]={...r,matchedInvoiceNumber:''};update({...active,bankRows:rows});}}}><option value="">Select invoice</option>{tx.map(t=><option key={t.invoiceNumber} value={t.invoiceNumber}>{t.invoiceNumber}</option>)}</select>:<span className="mono">{r.matchedInvoiceNumber||'—'}</span>}</td></tr>)}</tbody></table></div>:<TableEmpty text="Add bank statement rows to review deposits against invoice payment allocations."/>}</>}
       {tab==='Denominations' && <div className="denom-layout"><div><div className="tool-note"><Banknote size={16}/> Cash drawer count</div><p className="tool-hint denom-hint">Enter the number of notes and coins counted at close. Amounts save when you leave a field.</p><div className="denom-grid">{['500','200','100','50','20','10','5','2','1'].map(note=><label className="denom-row" key={`${selected}-${note}`}><span className="note-chip">₹{note}</span><span className="mono">×</span><ReconciliationNumberInput value={Number(active.denominations?.[note] ?? 0)} disabled={!batchEditable} label={`${note} rupee notes`} onCommit={value=>setDenom(note,value)}/><span className="mono denom-subtotal">{money(Number(note)*Number(active.denominations?.[note]||0))}</span></label>)}</div></div><div className="denom-summary"><div className="eyebrow">CASH CLOSE</div><strong className="mono">{money(denomTotal)}</strong><span>Physical count</span><div className="summary-line"/><span>Expected from sales less returns</span><b className="mono">{money(expectedCash)}</b><StatusPill tone={denomTotal===expectedCash?'good':'warn'}>{denomTotal===expectedCash?'Balanced':`${money(denomTotal-expectedCash)} variance`}</StatusPill>{active.status==='Submitted'?<Button kind="primary" onClick={exportTally}><FileDown size={15}/> Download Tally Excel</Button>:<Button kind="primary" disabled={!batchEditable||pending.length>0||denomTotal!==expectedCash||!uploaded} onClick={submitBatch}><CheckCircle2 size={15}/> Submit day and create Tally file</Button>}</div></div>}
     </Panel>
-    <div className="recon-footnote"><ShieldCheck size={16}/><span>Every adjustment is recorded in the workspace. Tally export uses the active batch only.</span><StatusPill tone="gold">{canEdit?'Editing enabled':'Read only'}</StatusPill></div>
+    <div className="recon-footnote"><ShieldCheck size={16}/><span>Every adjustment is recorded in the workspace. Tally export uses the active batch only.</span><StatusPill tone="gold">{canEdit||canBank?'Editing enabled':'Read only'}</StatusPill></div>
   </div>;
 }
 
@@ -534,7 +529,7 @@ function Team({ role, users, loading, onRole }: {role:Role;users:WorkspaceUser[]
 }
 
 function WorkspaceApp() {
-  const {query,me,b2c,dispatch,hr,attendance}=useWorkspace();
+  const {query,me,b2c,b2cBank,dispatch,hr,attendance}=useWorkspace();
   const roleMutation=useUpdateWorkspaceUserRole();
   const usersQuery=useListWorkspaceUsers({query:{queryKey:getListWorkspaceUsersQueryKey(),enabled:me.data?.role==='admin'}});
   const role=(me.data?.role || query.data?.user?.role || 'pending') as Role;
@@ -548,7 +543,7 @@ function WorkspaceApp() {
   const canPeople=role==='admin'||role==='accounts';
   return <AppShell role={role} name={name}><ErrorBoundary resetKey={loc}><Switch>
     <Route path="/"><Overview state={data}/></Route>
-    <Route path="/reconciliation">{canOperate||role==='accounts'?<Reconciliation state={data.b2c as AnyObj} canEdit={canOperate} role={role} save={next=>b2c.mutateAsync({data:{expectedVersion:data.version,data:next}})}/>:<AccessDenied/>}</Route>
+    <Route path="/reconciliation">{canOperate||role==='accounts'?<Reconciliation state={data.b2c as AnyObj} canEdit={canOperate} role={role} save={next=>b2c.mutateAsync({data:{expectedVersion:data.version,data:next}})} saveBank={next=>b2cBank.mutateAsync({data:{expectedVersion:data.version,data:next}})}/>:<AccessDenied/>}</Route>
     <Route path="/dispatch">{canOperate?<Dispatch state={data.dispatch as AnyObj} canEdit={canOperate} save={next=>dispatch.mutateAsync({data:{expectedVersion:data.version,data:next}})}/>:<AccessDenied/>}</Route>
     <Route path="/people">{canPeople?<People state={data.hr as AnyObj} canEdit={role==='admin'} canLog={canPeople} save={next=>save(hr,next)} saveAttendance={next=>save(attendance,next)}/>:<AccessDenied/>}</Route>
     <Route path="/payroll">{canPeople?<Payroll state={data.hr as AnyObj} canEdit={role==='admin'} save={next=>save(hr,next)}/>:<AccessDenied/>}</Route>

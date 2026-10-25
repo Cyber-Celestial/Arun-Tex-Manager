@@ -66,6 +66,24 @@ export const UpdateB2cStateResponse = zod.object({
 
 
 /**
+ * @summary Add HDFC bank statement deposits to one reconciliation (Accounts or Admin)
+ */
+export const updateB2cBankStateBodyExpectedVersionMin = 0;
+
+
+
+export const UpdateB2cBankStateBody = zod.object({
+  "expectedVersion": zod.number().int().min(updateB2cBankStateBodyExpectedVersionMin),
+  "data": zod.record(zod.string(), zod.unknown())
+})
+
+export const UpdateB2cBankStateResponse = zod.object({
+  "version": zod.number().int(),
+  "data": zod.record(zod.string(), zod.unknown())
+})
+
+
+/**
  * @summary Save B2B dispatch tracking data
  */
 export const updateDispatchStateBodyExpectedVersionMin = 0;

@@ -106,6 +106,42 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+  /workspace/data/b2c/bank:
+    put:
+      operationId: updateB2cBankState
+      tags: [workspace]
+      summary: Add HDFC bank statement deposits to one reconciliation (Accounts or Admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModuleStateInput"
+      responses:
+        "200":
+          description: Updated B2C state for the caller's role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModuleStateResponse"
+        "400":
+          description: Invalid bank statement rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Accounts or Admin role required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Reconciliation is locked or the workspace changed in another session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
   /workspace/data/dispatch:
     put:
       operationId: updateDispatchState
