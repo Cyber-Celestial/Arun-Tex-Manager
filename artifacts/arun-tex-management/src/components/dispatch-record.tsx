@@ -28,7 +28,7 @@ export function DispatchRecord({ invoice, canEdit, busy, expanded, onToggle, onU
         <span className="mono invoice-ref">{invoice.invoiceNumber || 'B2B INVOICE'}</span>
         <strong>{invoice.customerName || 'Customer details pending'}</strong>
         <small>{invoice.date?.slice(0,10) || 'No date'} · {invoice.shipToDetails || invoice.billToDetails || 'Address not recorded'}</small>
-      </span><span className="dispatch-card-side"><span className={`pill ${invoice.status === 'Completed' ? 'pill-good' : 'pill-warn'}`}>{invoice.status || 'Pending'}</span><ChevronDown size={16} className="dispatch-card-chevron"/></span></span>
+      </span><span className="dispatch-card-side">{invoice.ewayMovementBlocked && <span className="pill pill-bad" title={invoice.ewayMovementWarning || 'Movement blocked'}>Blocked</span>}<span className={`pill ${invoice.status === 'Completed' ? 'pill-good' : 'pill-warn'}`}>{invoice.status || 'Pending'}</span><ChevronDown size={16} className="dispatch-card-chevron"/></span></span>
     </button>
     <div className="checklist">{steps.map(([key,label]) => {
       const blocked = key === 'eWayDone' && invoice.ewayMovementBlocked;
