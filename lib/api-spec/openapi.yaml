@@ -74,7 +74,7 @@ paths:
     put:
       operationId: updateB2cState
       tags: [workspace]
-      summary: Save B2C reconciliation data
+      summary: Save B2C data
       requestBody:
         required: true
         content:
@@ -110,7 +110,7 @@ paths:
     put:
       operationId: updateB2cBankState
       tags: [workspace]
-      summary: Add HDFC bank statement deposits to one reconciliation (Accounts or Admin)
+      summary: Add HDFC bank statement deposits to one B2C day (Accounts or Admin)
       requestBody:
         required: true
         content:
@@ -137,7 +137,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
         "409":
-          description: Reconciliation is locked or the workspace changed in another session
+          description: B2C day is locked or the workspace changed in another session
           content:
             application/json:
               schema:

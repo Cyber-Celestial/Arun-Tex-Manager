@@ -335,7 +335,7 @@ function validateHrState(data: JsonObject): string | null {
   return null;
 }
 
-/** Accounts see every reconciliation in order, without cash counts; the export only once locked. */
+/** Accounts see every B2C day in order, without cash counts; the export only once locked. */
 function accountsB2cView(b2c: JsonObject): JsonObject {
   const batches = Array.isArray(b2c.batches) ? b2c.batches : [];
   return {
@@ -649,7 +649,7 @@ router.put("/workspace/data/b2c/bank", async (req, res): Promise<void> => {
   const day = reconciliationDate(request.date);
   const incoming = sanitizeBankRows(request.rows);
   if (!parsed.success || !Number.isInteger(batchIndex) || batchIndex < 0 || !day || !incoming) {
-    res.status(400).json({ error: "Choose a reconciliation and upload valid HDFC deposit rows." });
+    res.status(400).json({ error: "Choose a B2C day and upload valid HDFC deposit rows." });
     return;
   }
 
@@ -666,7 +666,7 @@ router.put("/workspace/data/b2c/bank", async (req, res): Promise<void> => {
   const b2c = structuredClone(current.b2c) as JsonObject;
   const batch = Array.isArray(b2c.batches) ? b2c.batches[batchIndex] : undefined;
   if (!isObject(batch) || reconciliationDate(batch.date) !== day) {
-    res.status(409).json({ error: "That reconciliation has changed. Refresh and try again." });
+    res.status(409).json({ error: "That B2C day has changed. Refresh and try again." });
     return;
   }
   if (batch.status === "Submitted") {

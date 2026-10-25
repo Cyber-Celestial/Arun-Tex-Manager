@@ -62,7 +62,7 @@ export function validateReconciliationChange(next: RecordValue, previous: Record
   if (!Array.isArray(next.batches)) return 'B2C data must contain a batches list.';
   const before = Array.isArray(previous.batches) ? previous.batches : [];
   const after = next.batches;
-  if (after.length < before.length) return 'Existing reconciliations cannot be removed by an upload.';
+  if (after.length < before.length) return 'Existing B2C days cannot be removed by an upload.';
   const oldCounts = new Map<string, number>();
   const nextCounts = new Map<string, number>();
   const uploadedBefore = new Map<string, number>();
@@ -75,14 +75,14 @@ export function validateReconciliationChange(next: RecordValue, previous: Record
   }
   for (let index = 0; index < after.length; index++) {
     const batch = after[index];
-    if (!object(batch) || !Array.isArray(batch.transactions)) return 'A reconciliation must contain a transactions list.';
+    if (!object(batch) || !Array.isArray(batch.transactions)) return 'A B2C day must contain a transactions list.';
     const old = object(before[index]) ? before[index] as RecordValue : undefined;
     const day = reconciliationDate(batch.date);
     // Do not make an unchanged legacy invalid date block unrelated work.
-    if (!day && (!old || batch.date !== old.date)) return 'Choose a valid reconciliation business date.';
+    if (!day && (!old || batch.date !== old.date)) return 'Choose a valid B2C business date.';
     if (old && ((reconciliationDate(old.date) || old.date) !== (day || batch.date) ||
       (old.id !== undefined && old.id !== batch.id))) {
-      return 'An existing reconciliation date or identity cannot be changed. Open the required date instead.';
+      return 'An existing B2C date or identity cannot be changed. Open the required date instead.';
     }
     if (day) {
       nextCounts.set(day, (nextCounts.get(day) || 0) + 1);
@@ -91,19 +91,19 @@ export function validateReconciliationChange(next: RecordValue, previous: Record
     if (old && isReconciliationUploaded(old)) {
       if (!isDeepStrictEqual(sourceRows(old), sourceRows(batch)) ||
         !isDeepStrictEqual(old.invoiceImport, batch.invoiceImport)) {
-        return `Reconciliation for ${day || String(batch.date)} has already been uploaded. Open the existing reconciliation; a second invoice upload is not allowed.`;
+        return `B2C for ${day || String(batch.date)} has already been uploaded. Open the existing B2C day; a second invoice upload is not allowed.`;
       }
     } else if (object(batch.invoiceImport) && rows(batch).length === 0) {
-      return 'A successful reconciliation upload must contain invoice or return rows.';
+      return 'A successful B2C upload must contain invoice or return rows.';
     }
   }
   for (const [day, count] of nextCounts) {
     if (count > Math.max(1, oldCounts.get(day) || 0))
-      return `A reconciliation already exists for ${day}. Open the existing reconciliation instead.`;
+      return `A B2C day already exists for ${day}. Open the existing B2C day instead.`;
   }
   for (const [day, count] of uploadedAfter) {
     if (count > Math.max(1, uploadedBefore.get(day) || 0))
-      return `Reconciliation for ${day} has already been uploaded. A second invoice upload is not allowed.`;
+      return `B2C for ${day} has already been uploaded. A second invoice upload is not allowed.`;
   }
   const duplicate = newDuplicateInvoice(before, after);
   if (duplicate) return `Invoice number ${duplicate} is already recorded. Each invoice or return number can appear only once.`;
