@@ -1,1 +1,2 @@
 - [Invoice extraction boundaries](invoice-extraction-boundaries.md) — preserve human review, private document handling, and explicit shipping-address confirmation.
+- [Confirmed payroll policy](payroll-policy.md) — PTO coverage, ₹500 unpaid days, ₹250 half-days, and ₹1,000 per weekend violation after the third annually.

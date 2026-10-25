@@ -84,6 +84,15 @@ export const UpdateDispatchStateResponse = zod.object({
 
 
 /**
+ * Admin-only version-checked save. To confirm payroll, send the unchanged
+ * current HR module with payrollCommand containing a month (YYYY-MM).
+ * The server calculates and stores an immutable payrollRuns snapshot,
+ * accrues PTO, and applies affordable note repayments atomically. Only the
+ * next open month may be confirmed, after it has ended. payrollCommand is
+ * removed from the response. Payroll history, PTO balances, tracking start,
+ * and issued salary advances are server-protected. Attendance and Sunday
+ * rosters affecting confirmed months are locked. New advances are checked
+ * against elapsed-day eligibility and projected non-negative take-home.
  * @summary Save HR, attendance, roster, and advance data
  */
 export const updateHrStateBodyExpectedVersionMin = 0;
