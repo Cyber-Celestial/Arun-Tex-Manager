@@ -60,6 +60,11 @@ export default defineConfig({
     dedupe: ['react', 'react-dom'],
   },
   root: path.resolve(import.meta.dirname),
+  // PDF.js is already a self-contained ESM bundle. Serving it directly avoids
+  // late dependency optimisation replacing its lazy-import URL in open tabs.
+  optimizeDeps: {
+    exclude: ['pdfjs-dist'],
+  },
   build: {
     outDir: path.resolve(import.meta.dirname, 'dist/public'),
     emptyOutDir: true,

@@ -220,7 +220,7 @@ export function DispatchInvoiceForm({ initial, onSave, onCancel }: Props) {
       )}
       {readError && (
         <div className="dif-alert dif-alert-error" role="alert">
-          <div><strong>PDF could not be read</strong>{readError} You can retry, reset, or enter the details by hand.</div>
+          <div><strong>{readError.includes('PDF reader could not load') ? 'PDF reader unavailable' : 'PDF could not be read'}</strong>{readError} You can retry, reset, or enter the details by hand.</div>
           {file && <button type="button" className="btn" disabled={saving||reading} onClick={() => runRead(file)}>Retry</button>}
         </div>
       )}

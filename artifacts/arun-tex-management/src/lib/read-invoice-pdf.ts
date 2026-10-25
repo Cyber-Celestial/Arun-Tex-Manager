@@ -12,7 +12,10 @@ export async function readInvoicePdf(
   const start = performance.now();
   const bytes = new Uint8Array(await file.arrayBuffer());
   if (new TextDecoder().decode(bytes.subarray(0, 5)) !== '%PDF-') throw new Error('This file is not a valid PDF.');
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  onProgress?.('Loading the local PDF reader…');
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs').catch(() => {
+    throw new Error('The PDF reader could not load. This is an application-loading problem, not an invalid invoice. Refresh the preview, then select the PDF again. No invoice has been saved.');
+  });
   signal?.throwIfAborted();
   pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
   const task = pdfjs.getDocument({ data: bytes, stopAtErrors: true });
