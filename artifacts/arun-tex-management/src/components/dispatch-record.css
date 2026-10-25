@@ -1,0 +1,9 @@
+.dispatch-card-toggle { display:block; width:100%; padding:0; border:0; background:none; text-align:left; font:inherit; color:inherit; cursor:pointer; }
+.dispatch-card-toggle:focus-visible { outline:2px solid #3f6f5b; outline-offset:3px; border-radius:6px; }
+.dispatch-card-side { display:flex; align-items:center; gap:10px; }
+.dispatch-card-chevron { color:#96988f; transition:transform .18s ease; }
+.dispatch-card-open .dispatch-card-chevron { transform:rotate(180deg); }
+.dispatch-card .checklist { margin:10px 0 0; }
+.dispatch-card-details { margin-top:4px; }
+.dispatch-card-toggle .dispatch-card-top { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+.dispatch-card-main { display:grid; gap:4px; min-width:0; }
