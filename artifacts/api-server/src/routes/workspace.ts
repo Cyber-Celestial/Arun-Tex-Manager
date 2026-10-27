@@ -43,7 +43,7 @@ import { removeB2cDay } from "../lib/reconciliation-delete";
 import { applyUpload, type UploadInput } from "../lib/reconciliation-upload";
 import { removeDispatchDay } from "../lib/dispatch-delete";
 import { applyManualReconciliation, type ManualReconcileInput } from "../lib/reconciliation-manual";
-import { appendBankRows, applyLateBankMatch, matchOnlinePayments, sanitizeBankRows, validateB2cRoleChange, validateLateMatchProtection } from "../lib/reconciliation-bank";
+import { type BankRow, appendBankRows, applyLateBankMatch, matchOnlinePayments, sanitizeBankRows, validateB2cRoleChange, validateLateMatchProtection } from "../lib/reconciliation-bank";
 import { reconciliationDate, validateReconciliationChange } from "../lib/reconciliation-policy";
 import { applyBatchWorkflow, countedCash, settleBatch, type Actor } from "../lib/reconciliation-workflow";
 
@@ -620,32 +620,43 @@ router.put("/workspace/data/b2c/bank", async (req, res): Promise<void> => {
   }
   const b2c = structuredClone(current.b2c) as JsonObject;
   const batches = Array.isArray(b2c.batches) ? b2c.batches as JsonObject[] : [];
-  let batch = batchIndex >= 0
-    ? batches[batchIndex]
-    : batches.find(candidate => reconciliationDate(candidate.date) === day);
-  if (!batch && batchIndex === -1) {
-    batch = {
-      id: randomUUID(),
-      date: day,
-      status: "Open",
-      transactions: [],
-      bankRows: [],
-      denominations: {},
-      billingSubmitted: false,
-      adminApproved: false,
-      editLog: [],
-    };
-    batches.push(batch);
-    b2c.batches = batches;
+  b2c.batches = batches;
+  const byDay = new Map<string, JsonObject[]>();
+  const queue = (row: JsonObject) => {
+    const rowDay = reconciliationDate(row.date);
+    if (rowDay) byDay.set(rowDay, [...(byDay.get(rowDay) ?? []), row]);
+  };
+  for (const batch of batches) {
+    if (batch.status === "Submitted" || !Array.isArray(batch.bankRows)) continue;
+    const own = reconciliationDate(batch.date);
+    const [keep, move] = [true, false].map(stay => (batch.bankRows as unknown[]).filter(row => isObject(row) &&
+      (reconciliationDate(row.date) === own || Boolean(String(row.matchedInvoiceNumber ?? "").trim()) || isObject(row.lateMatch) || isObject(row.manualNote)) === stay));
+    batch.bankRows = keep;
+    (move as JsonObject[]).forEach(queue);
   }
-  if (!isObject(batch) || reconciliationDate(batch.date) !== day) {
-    res.status(409).json({ error: "That B2C day has changed. Refresh and try again." });
-    return;
-  }
-  batch.bankRows = appendBankRows(batch.bankRows, incoming).rows;
-  if (batch.status !== "Submitted") {
-    matchOnlinePayments({ batches: [batch] }, user.role);
-    settleBatch(batch, actorOf(user), new Date().toISOString());
+  for (const row of incoming) queue({ ...row });
+  const now = new Date().toISOString();
+  for (const [rowDay, dayRows] of byDay) {
+    let batch = batches.find(candidate => reconciliationDate(candidate.date) === rowDay);
+    if (!batch) {
+      batch = {
+        id: randomUUID(),
+        date: rowDay,
+        status: "Open",
+        transactions: [],
+        bankRows: [],
+        denominations: {},
+        billingSubmitted: false,
+        adminApproved: false,
+        editLog: [],
+      };
+      batches.push(batch);
+    }
+    batch.bankRows = appendBankRows(batch.bankRows, dayRows as unknown as BankRow[]).rows;
+    if (batch.status !== "Submitted") {
+      matchOnlinePayments({ batches: [batch] }, user.role);
+      settleBatch(batch, actorOf(user), now);
+    }
   }
 
   const updated = await db
