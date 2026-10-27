@@ -4,4 +4,13 @@
 .recon-date-create small { font-size:10px; color:#7c8178; }
 .recon-error { display:flex; align-items:center; flex-wrap:wrap; gap:12px; padding:13px 16px; border:1px solid #e2c7ae; background:#fff6eb; border-radius:8px; color:#81552f; font-size:12px; }
 .recon-date-create input:focus-visible { outline:2px solid #246451; outline-offset:2px; }
+.late-match-form { display:grid; grid-template-columns:minmax(180px,1fr) minmax(240px,1.5fr) auto; gap:12px; align-items:end; padding:12px; border:1px solid #dedacd; border-radius:7px; background:#fbfaf5; white-space:normal; }
+.late-match-form label { display:grid; gap:6px; color:#606a63; font:600 9px var(--app-font-mono); letter-spacing:.04em; }
+.late-match-form select,.late-match-form textarea { width:100%; min-width:0; border:1px solid #dedacd; border-radius:5px; background:#fffdf8; color:#34423e; padding:8px 9px; font:400 11px var(--app-font-sans); letter-spacing:normal; }
+.late-match-form textarea { resize:vertical; min-height:55px; }
+.late-match-actions { display:flex; gap:7px; align-items:center; }
+.late-match-status { display:grid; gap:3px; white-space:normal; min-width:130px; }
+.late-match-status strong { color:#386b56; font-size:9px; }
+.late-match-status small { color:#82877d; font-size:8px; max-width:250px; }
 @media (max-width:640px) { .recon-date-create { align-items:stretch; } .recon-date-create label,.recon-date-create small { flex-basis:100%; } .recon-date-create input { flex:1 1 130px; } .recon-date-create .btn { flex:1 1 180px; } .recon-toolbar .batch-switch { flex-wrap:wrap; max-width:100%; } .recon-toolbar .batch-switch select { min-width:0; max-width:100%; } }
+@media (max-width:640px) { .late-match-form { grid-template-columns:1fr; } .late-match-actions { flex-wrap:wrap; } }

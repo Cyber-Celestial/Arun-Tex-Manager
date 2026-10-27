@@ -6,6 +6,8 @@ import {
   DeleteDispatchDayResponse,
   GetWorkspaceMeResponse,
   GetWorkspaceStateResponse,
+  LateMatchB2cBankBody,
+  LateMatchB2cBankResponse,
   ListWorkspaceUsersResponse,
   UpdateAttendanceStateBody,
   UpdateAttendanceStateResponse,
@@ -32,12 +34,13 @@ import {
 } from "@workspace/db";
 import { and, eq, sql } from "drizzle-orm";
 import { Router, type IRouter, type Request, type Response } from "express";
+import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { validateDispatchState } from "../lib/dispatch-validation";
 import { removeB2cDay } from "../lib/reconciliation-delete";
 import { applyUpload, type UploadInput } from "../lib/reconciliation-upload";
 import { removeDispatchDay } from "../lib/dispatch-delete";
-import { appendBankRows, sanitizeBankRows, validateB2cRoleChange } from "../lib/reconciliation-bank";
+import { appendBankRows, applyLateBankMatch, matchOnlinePayments, sanitizeBankRows, validateB2cRoleChange, validateLateMatchProtection } from "../lib/reconciliation-bank";
 import { reconciliationDate, validateReconciliationChange } from "../lib/reconciliation-policy";
 import { applyBatchWorkflow, countedCash, settleBatch, type Actor } from "../lib/reconciliation-workflow";
 
@@ -149,76 +152,6 @@ async function ensureStateRow(): Promise<void> {
     .insert(operationsStateTable)
     .values({ id: "main", ...INITIAL_STATE })
     .onConflictDoNothing();
-}
-
-function classifyBankMode(row: JsonObject): "UPI" | "CARD" | null {
-  const mode = String(row.mode ?? "").toUpperCase();
-  if (mode.includes("UPI")) return "UPI";
-  if (mode.includes("CARD")) return "CARD";
-  const narration = String(row.narration ?? "").toUpperCase();
-  if (narration.includes("UPI") || narration.includes("@")) return "UPI";
-  if (["POS", "SWIPE", "MERCHANT", "SETTLEMENT"].some((word) => narration.includes(word))) {
-    return "CARD";
-  }
-  return null;
-}
-
-function matchOnlinePayments(data: JsonObject, role: WorkspaceRole): void {
-  if (!Array.isArray(data.batches)) return;
-  for (const batchValue of data.batches) {
-    if (!isObject(batchValue) || !Array.isArray(batchValue.transactions)) continue;
-    const batch = batchValue;
-    const transactions = batch.transactions as unknown[];
-    const bankRows = Array.isArray(batch.bankRows)
-      ? batch.bankRows.filter(isObject)
-      : [];
-    const allocated = new Set<JsonObject>();
-
-    for (const transactionValue of transactions) {
-      if (!isObject(transactionValue) || transactionValue.type === "Return") continue;
-      const transaction = transactionValue;
-      const invoiceNumber = String(transaction.invoiceNumber ?? "");
-      const expected = [
-        { mode: "UPI" as const, amount: Number(transaction.upiAmount ?? 0) },
-        { mode: "CARD" as const, amount: Number(transaction.cardAmount ?? 0) },
-      ].filter((part) => part.amount > 0);
-
-      if (expected.length === 0) continue;
-
-      const matches: Array<{ mode: "UPI" | "CARD"; reference: string; amount: number }> = [];
-      for (const part of expected) {
-        const bankRow = bankRows.find((row) => {
-          if (allocated.has(row) || classifyBankMode(row) !== part.mode) return false;
-          const date = String(row.date ?? "").slice(0, 10);
-          const transactionDate = String(transaction.date ?? "").slice(0, 10);
-          const deposit = Number(row.depositAmount);
-          return (
-            date === transactionDate &&
-            Number.isFinite(deposit) &&
-            Math.round(deposit * 100) === Math.round(part.amount * 100)
-          );
-        });
-        if (!bankRow) continue;
-        allocated.add(bankRow);
-        const reference = String(bankRow.reference ?? bankRow.bankTransactionId ?? "");
-        matches.push({ mode: part.mode, reference, amount: part.amount });
-        bankRow.matchedInvoiceNumber = invoiceNumber;
-        bankRow.matchedMode = part.mode;
-      }
-
-      const fullyMatched = matches.length === expected.length;
-      const override = role === "admin" && transaction.adminOverride === true;
-      transaction.bankMatches = matches;
-      transaction.bankVerified = fullyMatched || override;
-      transaction.bankTransactionId =
-        matches.length === 1 ? matches[0].reference : null;
-      transaction.bankVerificationStatus = fullyMatched
-        ? "Matched"
-        : override
-          ? "Admin override"
-          : "Missing bank entry";
-    }
-  }
 }
 
 function validateB2cState(data: JsonObject): string | null {
@@ -539,6 +472,11 @@ async function writeModule(
     const nextBatches = Array.isArray(data.batches) ? data.batches : [];
     if (isObject(current?.b2c) && current.b2c.deletions !== undefined) data.deletions = current.b2c.deletions;
     else delete data.deletions;
+    const lateMatchError = validateLateMatchProtection(data, isObject(current?.b2c) ? current.b2c : {});
+    if (lateMatchError) {
+      res.status(403).json({ error: lateMatchError });
+      return;
+    }
     const roleError = validateB2cRoleChange(user.role, data, isObject(current?.b2c) ? current.b2c : {});
     if (roleError) {
       res.status(403).json({ error: roleError });
@@ -662,8 +600,8 @@ router.put("/workspace/data/b2c/bank", async (req, res): Promise<void> => {
   const batchIndex = Number(request.batchIndex);
   const day = reconciliationDate(request.date);
   const incoming = sanitizeBankRows(request.rows);
-  if (!parsed.success || !Number.isInteger(batchIndex) || batchIndex < 0 || !day || !incoming) {
-    res.status(400).json({ error: "Choose a B2C day and upload valid HDFC deposit rows." });
+  if (!parsed.success || !Number.isInteger(batchIndex) || batchIndex < -1 || !day || !incoming) {
+    res.status(400).json({ error: "Choose a B2C day and upload at least one valid UPI or card deposit." });
     return;
   }
 
@@ -678,18 +616,34 @@ router.put("/workspace/data/b2c/bank", async (req, res): Promise<void> => {
     return;
   }
   const b2c = structuredClone(current.b2c) as JsonObject;
-  const batch = Array.isArray(b2c.batches) ? b2c.batches[batchIndex] : undefined;
+  const batches = Array.isArray(b2c.batches) ? b2c.batches as JsonObject[] : [];
+  let batch = batchIndex >= 0
+    ? batches[batchIndex]
+    : batches.find(candidate => reconciliationDate(candidate.date) === day);
+  if (!batch && batchIndex === -1) {
+    batch = {
+      id: randomUUID(),
+      date: day,
+      status: "Open",
+      transactions: [],
+      bankRows: [],
+      denominations: {},
+      billingSubmitted: false,
+      adminApproved: false,
+      editLog: [],
+    };
+    batches.push(batch);
+    b2c.batches = batches;
+  }
   if (!isObject(batch) || reconciliationDate(batch.date) !== day) {
     res.status(409).json({ error: "That B2C day has changed. Refresh and try again." });
     return;
   }
-  if (batch.status === "Submitted") {
-    res.status(409).json({ error: "Submitted batches are locked. Start a new batch for later adjustments." });
-    return;
-  }
   batch.bankRows = appendBankRows(batch.bankRows, incoming).rows;
-  matchOnlinePayments({ batches: [batch] }, user.role);
-  settleBatch(batch, actorOf(user), new Date().toISOString());
+  if (batch.status !== "Submitted") {
+    matchOnlinePayments({ batches: [batch] }, user.role);
+    settleBatch(batch, actorOf(user), new Date().toISOString());
+  }
 
   const updated = await db
     .update(operationsStateTable)
@@ -703,6 +657,61 @@ router.put("/workspace/data/b2c/bank", async (req, res): Promise<void> => {
   res.json(UpdateB2cBankStateResponse.parse({
     version: updated[0].version,
     data: user.role === "accounts" ? accountsB2cView(b2c) : b2c,
+  }));
+});
+
+router.put("/workspace/data/b2c/bank/late-match", async (req, res): Promise<void> => {
+  const user = await requireWorkspaceUser(req, res);
+  if (!user) return;
+  if (user.role !== "admin") {
+    res.status(403).json({ error: "Only an Admin can record a late bank match." });
+    return;
+  }
+  const parsed = LateMatchB2cBankBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Choose a payment and deposit, then add a note of up to 500 characters." });
+    return;
+  }
+
+  await ensureStateRow();
+  const [current] = await db
+    .select({ b2c: operationsStateTable.b2c, version: operationsStateTable.version })
+    .from(operationsStateTable)
+    .where(eq(operationsStateTable.id, "main"))
+    .limit(1);
+  if (current.version !== parsed.data.expectedVersion) {
+    res.status(409).json({ error: "The workspace changed in another session. Refresh and try again." });
+    return;
+  }
+
+  const b2c = structuredClone(current.b2c) as JsonObject;
+  const { expectedVersion, ...input } = parsed.data;
+  const now = new Date().toISOString();
+  const error = applyLateBankMatch(b2c, input, actorOf(user), now);
+  if (error) {
+    const status = error.includes("could not be found") ? 404
+      : error.includes("already matched") ? 409
+        : 400;
+    res.status(status).json({ error });
+    return;
+  }
+
+  const batches = Array.isArray(b2c.batches) ? b2c.batches.filter(isObject) : [];
+  const paymentBatch = batches.find(batch => String(batch.id ?? "") === input.paymentBatchId);
+  if (paymentBatch) settleBatch(paymentBatch, actorOf(user), now);
+
+  const updated = await db
+    .update(operationsStateTable)
+    .set({ b2c, version: sql`${operationsStateTable.version} + 1` })
+    .where(and(eq(operationsStateTable.id, "main"), eq(operationsStateTable.version, expectedVersion)))
+    .returning({ version: operationsStateTable.version });
+  if (!updated[0]) {
+    res.status(409).json({ error: "The workspace changed in another session. Refresh and try again." });
+    return;
+  }
+  res.json(LateMatchB2cBankResponse.parse({
+    version: updated[0].version,
+    data: b2c,
   }));
 });
 

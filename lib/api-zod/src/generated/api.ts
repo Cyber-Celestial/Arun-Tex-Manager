@@ -102,7 +102,7 @@ export const DeleteB2cDayResponse = zod.object({
 
 
 /**
- * @summary Add HDFC bank statement deposits to one B2C day (Accounts or Admin)
+ * @summary Add UPI or card deposits to an existing or bank-only B2C day (Accounts or Admin)
  */
 export const updateB2cBankStateBodyExpectedVersionMin = 0;
 
@@ -114,6 +114,36 @@ export const UpdateB2cBankStateBody = zod.object({
 })
 
 export const UpdateB2cBankStateResponse = zod.object({
+  "version": zod.number().int(),
+  "data": zod.record(zod.string(), zod.unknown())
+})
+
+
+/**
+ * @summary Match a later UPI or card deposit to an earlier B2C payment (Admin)
+ */
+export const lateMatchB2cBankBodyExpectedVersionMin = 0;
+
+
+
+
+export const lateMatchB2cBankBodyBankRowIndexMin = 0;
+
+export const lateMatchB2cBankBodyNoteMax = 500;
+
+
+
+export const LateMatchB2cBankBody = zod.object({
+  "expectedVersion": zod.number().int().min(lateMatchB2cBankBodyExpectedVersionMin),
+  "paymentBatchId": zod.string().min(1),
+  "invoiceNumber": zod.string().min(1),
+  "mode": zod.enum(['UPI', 'CARD']),
+  "depositBatchId": zod.string().min(1),
+  "bankRowIndex": zod.number().int().min(lateMatchB2cBankBodyBankRowIndexMin),
+  "note": zod.string().min(1).max(lateMatchB2cBankBodyNoteMax)
+})
+
+export const LateMatchB2cBankResponse = zod.object({
   "version": zod.number().int(),
   "data": zod.record(zod.string(), zod.unknown())
 })

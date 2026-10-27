@@ -66,6 +66,33 @@ export interface ModuleStateResponse {
   data: WorkspaceModule;
 }
 
+export type B2cLateMatchInputMode = typeof B2cLateMatchInputMode[keyof typeof B2cLateMatchInputMode];
+
+
+export const B2cLateMatchInputMode = {
+  UPI: 'UPI',
+  CARD: 'CARD',
+} as const;
+
+export interface B2cLateMatchInput {
+  /** @minimum 0 */
+  expectedVersion: number;
+  /** @minLength 1 */
+  paymentBatchId: string;
+  /** @minLength 1 */
+  invoiceNumber: string;
+  mode: B2cLateMatchInputMode;
+  /** @minLength 1 */
+  depositBatchId: string;
+  /** @minimum 0 */
+  bankRowIndex: number;
+  /**
+     * @minLength 1
+     * @maxLength 500
+     */
+  note: string;
+}
+
 export interface UploadUrlInput {
   /** @minLength 1 */
   name: string;

@@ -7,6 +7,8 @@
  */
 
 export * from './apiError';
+export * from './b2cLateMatchInput';
+export * from './b2cLateMatchInputMode';
 export * from './healthStatus';
 export * from './moduleStateInput';
 export * from './moduleStateResponse';

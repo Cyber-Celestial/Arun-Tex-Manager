@@ -26,6 +26,7 @@ import type {
 
 import type {
   ApiError,
+  B2cLateMatchInput,
   HealthStatus,
   ModuleStateInput,
   ModuleStateResponse,
@@ -640,7 +641,7 @@ export const getUpdateB2cBankStateUrl = () => {
 }
 
 /**
- * @summary Add HDFC bank statement deposits to one B2C day (Accounts or Admin)
+ * @summary Add UPI or card deposits to an existing or bank-only B2C day (Accounts or Admin)
  */
 export const updateB2cBankState = async (moduleStateInput: ModuleStateInput, options?: Parameters<typeof customFetch>[1]): Promise<ModuleStateResponse> => {
 
@@ -706,7 +707,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type UpdateB2cBankStateMutationVariables = {data: BodyType<ModuleStateInput>}
 
     /**
- * @summary Add HDFC bank statement deposits to one B2C day (Accounts or Admin)
+ * @summary Add UPI or card deposits to an existing or bank-only B2C day (Accounts or Admin)
  */
 export const useUpdateB2cBankState = <TError = ErrorType<ApiError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateB2cBankState>>, TError,UpdateB2cBankStateMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -717,6 +718,94 @@ export const useUpdateB2cBankState = <TError = ErrorType<ApiError>,
         TContext
       > => {
       return useMutation(getUpdateB2cBankStateMutationOptions(options), queryClient);
+    }
+
+export const getLateMatchB2cBankUrl = () => {
+
+
+
+
+  return `/api/workspace/data/b2c/bank/late-match`
+}
+
+/**
+ * @summary Match a later UPI or card deposit to an earlier B2C payment (Admin)
+ */
+export const lateMatchB2cBank = async (b2cLateMatchInput: B2cLateMatchInput, options?: Parameters<typeof customFetch>[1]): Promise<ModuleStateResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ModuleStateResponse>(getLateMatchB2cBankUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(b2cLateMatchInput)
+  }
+);}
+
+
+
+
+
+export const getLateMatchB2cBankMutationKey = () => ['lateMatchB2cBank'] as const;
+
+export const getLateMatchB2cBankMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof lateMatchB2cBank>>, TError,LateMatchB2cBankMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof lateMatchB2cBank>>, TError,LateMatchB2cBankMutationVariables, TContext> => {
+
+const mutationKey = getLateMatchB2cBankMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof lateMatchB2cBank>>, LateMatchB2cBankMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  lateMatchB2cBank(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type LateMatchB2cBankMutationResult = NonNullable<Awaited<ReturnType<typeof lateMatchB2cBank>>>
+    export type LateMatchB2cBankMutationBody = BodyType<B2cLateMatchInput>
+    export type LateMatchB2cBankMutationError = ErrorType<ApiError>
+    export type LateMatchB2cBankMutationVariables = {data: BodyType<B2cLateMatchInput>}
+
+    /**
+ * @summary Match a later UPI or card deposit to an earlier B2C payment (Admin)
+ */
+export const useLateMatchB2cBank = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof lateMatchB2cBank>>, TError,LateMatchB2cBankMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof lateMatchB2cBank>>,
+        TError,
+        LateMatchB2cBankMutationVariables,
+        TContext
+      > => {
+      return useMutation(getLateMatchB2cBankMutationOptions(options), queryClient);
     }
 
 export const getUpdateDispatchStateUrl = () => {

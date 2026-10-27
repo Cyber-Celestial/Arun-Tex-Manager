@@ -10,6 +10,7 @@ const actionLabel: Record<string, string> = {
   'approval-cleared': 'Approval cleared by an edit',
   lock: 'Batch locked and Tally export unlocked',
   edit: 'Admin edited the batch',
+  'late-bank-match': 'Admin recorded a late bank match',
   replace: 'An Excel file was replaced',
   upload: 'An Excel file was added',
 };

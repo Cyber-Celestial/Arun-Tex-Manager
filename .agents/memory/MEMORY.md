@@ -1,2 +1,3 @@
 - [Local invoice extraction policy](local-invoice-extraction.md) — keep invoice parsing local and distinguish extracted IDs from verified transport compliance.
 - [Reconciliation upload policy](reconciliation-upload-policy.md) — allow any past business date, but never upload reconciliation twice for the same date.
+- [B2C bank matching policy](b2c-late-bank-matching.md) — ignore non-UPI/card statement entries; late matches require an Admin note and audit details.
