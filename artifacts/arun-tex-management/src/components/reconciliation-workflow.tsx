@@ -11,6 +11,9 @@ const actionLabel: Record<string, string> = {
   lock: 'Batch locked and Tally export unlocked',
   edit: 'Admin edited the batch',
   'late-bank-match': 'Admin recorded a late bank match',
+  'bank-club': 'Deposits clubbed to one invoice',
+  'bank-invoice-note': 'Admin accepted a payment with a note',
+  'bank-row-note': 'Admin noted a statement row',
   replace: 'An Excel file was replaced',
   upload: 'An Excel file was added',
 };

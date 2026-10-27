@@ -1,3 +1,4 @@
+import { BankReconcilePanel, type ReconcileRequest } from '@/components/bank-reconcile-panel';
 import { Fragment, type ReactNode, useEffect, useRef, useState } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { ClerkProvider, SignIn, SignUp, useClerk, useUser } from '@clerk/react';
@@ -24,7 +25,7 @@ import {
   getGetWorkspaceMeQueryKey, getGetWorkspaceStateQueryKey, getListWorkspaceUsersQueryKey, useGetWorkspaceMe,
   useGetWorkspaceState, useListWorkspaceUsers, useRequestUploadUrl, useUpdateAttendanceState,
   useDeleteB2cDay, useDeleteDispatchDay, useUpdateB2cBankState, useUpdateB2cState, useUpdateDispatchState, useUpdateHrState,
-  useUpdateWorkspaceUserRole, useUploadB2cDay, useLateMatchB2cBank,
+  useUpdateWorkspaceUserRole, useUploadB2cDay, useLateMatchB2cBank, useReconcileB2cBank,
 } from '@workspace/api-client-react';
 import type { WorkspaceState, WorkspaceUser } from '@workspace/api-client-react';
 import { Link, Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
@@ -61,7 +62,11 @@ type AnyObj = Record<string, any>;
 type Role = 'admin' | 'billing' | 'accounts' | 'pending';
 type LateMatchRequest = { paymentBatchId: string; invoiceNumber: string; mode: 'UPI'|'CARD'; depositBatchId: string; bankRowIndex: number; note: string };
 const money = (n: unknown) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(Number(n) || 0);
-const shortDate = (d: string) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '—';
+const shortDate = (d: string) => {
+  if (!d) return '—';
+  const day = /^(\d{4})-(\d{2})-(\d{2})/.exec(d);
+  return (day ? new Date(Number(day[1]), Number(day[2]) - 1, Number(day[3])) : new Date(d)).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+};
 const arr = (v: unknown): AnyObj[] => Array.isArray(v) ? v : [];
 const cleanName = (s: string) => s.split(/(?=[A-Z])/).join(' ').replace(/^./, x => x.toUpperCase());
 function downloadTallyWorkbook(exportData: AnyObj, fallbackDate = 'batch') {
@@ -210,11 +215,12 @@ function useWorkspace() {
   const deleteB2c = useDeleteB2cDay({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,b2c:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); }, onError:()=>qc.invalidateQueries({queryKey:getGetWorkspaceStateQueryKey()}) } });
   const b2cBank = useUpdateB2cBankState({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,b2c:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); }, onError:()=>qc.invalidateQueries({queryKey:getGetWorkspaceStateQueryKey()}) } });
   const lateB2cBank = useLateMatchB2cBank({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,b2c:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); }, onError:()=>qc.invalidateQueries({queryKey:getGetWorkspaceStateQueryKey()}) } });
+  const reconcileB2cBank = useReconcileB2cBank({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,b2c:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); }, onError:()=>qc.invalidateQueries({queryKey:getGetWorkspaceStateQueryKey()}) } });
   const dispatch = useUpdateDispatchState({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,dispatch:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); }, onError:()=>{void qc.invalidateQueries({queryKey:getGetWorkspaceStateQueryKey()});} } });
   const deleteDispatch = useDeleteDispatchDay({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,dispatch:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); }, onError:()=>{void qc.invalidateQueries({queryKey:getGetWorkspaceStateQueryKey()});} } });
   const hr = useUpdateHrState({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,hr:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); } } });
   const attendance = useUpdateAttendanceState({ mutation: { onSuccess: result => { qc.setQueryData<WorkspaceState>(getGetWorkspaceStateQueryKey(),old=>old?{...old,version:result.version,hr:result.data}:old); void qc.invalidateQueries({ queryKey: getGetWorkspaceStateQueryKey() }); } } });
-  return { query, me, b2c, b2cBank, lateB2cBank, uploadB2c, deleteB2c, dispatch, deleteDispatch, hr, attendance };
+  return { query, me, b2c, b2cBank, lateB2cBank, reconcileB2cBank, uploadB2c, deleteB2c, dispatch, deleteDispatch, hr, attendance };
 }
 function LoadingView() { return <div className="loading-view"><div className="skeleton skeleton-title"/><div className="skeleton-row">{[1,2,3,4].map(i=><div className="skeleton skeleton-card" key={i}/>)}</div><div className="skeleton skeleton-table"/></div>; }
 function LoadError({ retry }: { retry: () => void }) { return <div className="error-state"><CircleAlert size={24}/><h2>Workspace data did not load</h2><p>Check the connection, then try again. No changes have been made.</p><div className="error-actions"><Button kind="primary" onClick={retry}>Try again</Button><Link href="/sign-in" className="text-link">Sign in to workspace</Link></div></div>; }
@@ -260,7 +266,7 @@ export function Overview({ state }: { state: WorkspaceState }) {
   </div>;
 }
 
-function Reconciliation({ state, canEdit, role, save, saveBank, upload, lateMatch, deleteDay }: { state: AnyObj; canEdit: boolean; role: Role; save: (data: AnyObj)=>Promise<unknown>; saveBank: (data: AnyObj)=>Promise<unknown>; upload: (data: AnyObj)=>Promise<unknown>; lateMatch: (input: LateMatchRequest)=>Promise<unknown>; deleteDay?: (date: string)=>Promise<unknown> }) {
+function Reconciliation({ state, canEdit, role, save, saveBank, upload, lateMatch, reconcile, deleteDay }: { state: AnyObj; canEdit: boolean; role: Role; save: (data: AnyObj)=>Promise<unknown>; saveBank: (data: AnyObj)=>Promise<unknown>; upload: (data: AnyObj)=>Promise<unknown>; lateMatch: (input: LateMatchRequest)=>Promise<unknown>; reconcile: (input: ReconcileRequest)=>Promise<unknown>; deleteDay?: (date: string)=>Promise<unknown> }) {
   const canBank = role==='admin'||role==='accounts';
   const batches = arr(state.batches);
   const [dayKey, setDayKey] = useState(() => businessDate(new URLSearchParams(window.location.search).get('date')) ||
@@ -419,6 +425,7 @@ function Reconciliation({ state, canEdit, role, save, saveBank, upload, lateMatc
           <span className="tool-hint">Only UPI and card deposits are kept. Same-day matches are automatic; statement rows can still be added after submission.</span>
           {canBank?<><input id="bank-import" type="file" accept=".csv,.txt,.xls,.xlsx" hidden data-testid="input-bank-statement" onChange={e=>{handleBankImport(e.target.files?.[0]);e.target.value='';}}/><Button onClick={importBankFile} disabled={!bankEditable} data-testid="button-import-bank-statement"><FileSpreadsheet size={14}/> Import HDFC statement</Button></>:<span className="tool-hint">Bank statements are uploaded by Accounts or Admin.</span>}
         </div>
+        {canBank&&<BankReconcilePanel batch={active} rows={bankRows} role={role} busy={busy} format={money} onReconcile={request=>runAction(()=>reconcile(request),'Reconciliation saved with an audit note.',canBank)}/>}
         {bankRows.length ? <div className="table-wrap"><table>
           <thead><tr><th>DEPOSIT DATE</th><th>NARRATION / REFERENCE</th><th>MODE</th><th>DEPOSIT</th><th>MATCH TO INVOICE</th></tr></thead>
           <tbody>{bankRows.map((r,i)=>{
@@ -432,8 +439,10 @@ function Reconciliation({ state, canEdit, role, save, saveBank, upload, lateMatc
                 <td><span className="method-chip">{r.mode || '—'}</span></td>
                 <td className="mono">{money(r.depositAmount)}</td>
                 <td>
-                  {r.lateMatch
-                    ? <span className="late-match-status"><strong>Late match · {r.matchedInvoiceNumber}</strong><small>{r.lateMatch.note}</small></span>
+                  {r.manualNote
+                    ? <span className="late-match-status"><strong>Noted · other inward</strong><small>{r.manualNote.note}</small></span>
+                    : r.lateMatch
+                    ? <span className="late-match-status"><strong>{r.lateMatch.kind==='club'?'Clubbed':'Late match'} · {r.matchedInvoiceNumber}</strong><small>{r.lateMatch.note}</small></span>
                     : r.matchedInvoiceNumber
                       ? <span className="mono">Matched · {r.matchedInvoiceNumber}</span>
                       : role==='admin'&&candidates.length
@@ -566,7 +575,7 @@ function Team({ role, users, loading, onRole }: {role:Role;users:WorkspaceUser[]
 }
 
 function WorkspaceApp() {
-  const {query,me,b2c,b2cBank,lateB2cBank,uploadB2c,deleteB2c,dispatch,deleteDispatch,hr,attendance}=useWorkspace();
+  const {query,me,b2c,b2cBank,lateB2cBank,reconcileB2cBank,uploadB2c,deleteB2c,dispatch,deleteDispatch,hr,attendance}=useWorkspace();
   const roleMutation=useUpdateWorkspaceUserRole();
   const usersQuery=useListWorkspaceUsers({query:{queryKey:getListWorkspaceUsersQueryKey(),enabled:me.data?.role==='admin'}});
   const role=(me.data?.role || query.data?.user?.role || 'pending') as Role;
@@ -580,7 +589,7 @@ function WorkspaceApp() {
   const canPeople=role==='admin'||role==='accounts';
   return <AppShell role={role} name={name}><ErrorBoundary resetKey={loc}><Switch>
     <Route path="/"><Overview state={data}/></Route>
-    <Route path="/reconciliation">{canOperate||role==='accounts'?<Reconciliation state={data.b2c as AnyObj} canEdit={canOperate} role={role} save={next=>b2c.mutateAsync({data:{expectedVersion:data.version,data:next}})} saveBank={next=>b2cBank.mutateAsync({data:{expectedVersion:data.version,data:next}})} upload={next=>uploadB2c.mutateAsync({data:{expectedVersion:data.version,data:next}})} lateMatch={input=>lateB2cBank.mutateAsync({data:{expectedVersion:data.version,...input}})} deleteDay={role==='admin'?(date=>deleteB2c.mutateAsync({data:{expectedVersion:data.version,data:{date}}})):undefined}/>:<AccessDenied/>}</Route>
+    <Route path="/reconciliation">{canOperate||role==='accounts'?<Reconciliation state={data.b2c as AnyObj} canEdit={canOperate} role={role} save={next=>b2c.mutateAsync({data:{expectedVersion:data.version,data:next}})} saveBank={next=>b2cBank.mutateAsync({data:{expectedVersion:data.version,data:next}})} upload={next=>uploadB2c.mutateAsync({data:{expectedVersion:data.version,data:next}})} lateMatch={input=>lateB2cBank.mutateAsync({data:{expectedVersion:data.version,...input}})} reconcile={input=>reconcileB2cBank.mutateAsync({data:{expectedVersion:data.version,...input}})} deleteDay={role==='admin'?(date=>deleteB2c.mutateAsync({data:{expectedVersion:data.version,data:{date}}})):undefined}/>:<AccessDenied/>}</Route>
     <Route path="/dispatch">{canOperate?<Dispatch state={data.dispatch as AnyObj} canEdit={canOperate} save={next=>dispatch.mutateAsync({data:{expectedVersion:data.version,data:next}})} onDeleteDay={role==='admin'?(date=>deleteDispatch.mutateAsync({data:{expectedVersion:data.version,data:{date}}})):undefined}/>:<AccessDenied/>}</Route>
     <Route path="/people">{canPeople?<People state={data.hr as AnyObj} canEdit={role==='admin'} canLog={canPeople} save={next=>save(hr,next)} saveAttendance={next=>save(attendance,next)}/>:<AccessDenied/>}</Route>
     <Route path="/payroll">{canPeople?<Payroll state={data.hr as AnyObj} canEdit={role==='admin'} save={next=>save(hr,next)}/>:<AccessDenied/>}</Route>
