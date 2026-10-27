@@ -361,11 +361,11 @@ function Reconciliation({ state, canEdit, role, save, saveBank, upload, lateMatc
         }
       }
       if(!imported.length){setImportMessage(`No UPI or card deposits found. Other transaction types were ignored${ignored?` (${ignored} rows)` : ''}.`);return;}
-      const dated=imported.filter(row=>row.date); const skipped=imported.length-dated.length;
-      if(!dated.length){setImportMessage('No deposit rows had a readable date. Nothing was uploaded.');return;}
+      const dayDate=businessDate(active.date); const dated=imported.filter(row=>businessDate(row.date)===dayDate); const skipped=imported.length-dated.length;
+      if(!dated.length){setImportMessage(`No UPI or card deposits dated ${reconciliationLabel(dayDate)} in this statement. Other dates are ignored. Nothing was uploaded.`);return;}
       await saveBank({batchIndex:selected,date:businessDate(active.date),rows:dated});
       if(!hasBatch)setTab('Bank matching');
-      setImportMessage(`${dated.length} UPI/card deposits imported.${ignored?` ${ignored} other transaction rows ignored.`:''}${skipped?` ${skipped} rows without a readable date were skipped.`:''}`);
+      setImportMessage(`${dated.length} UPI/card deposits imported.${ignored?` ${ignored} other transaction rows ignored.`:''}${skipped?` ${skipped} deposits dated on other days were ignored.`:''}`);
   },undefined,canBank); };
   const setDenom=(key:string,value:number)=>update({...active,denominations:{...active.denominations,[key]:value}});
   const total = tx.filter(t=>t.type!=='Return').reduce((s,t)=>s+Number(t.totalInvoiceAmount||0),0);
