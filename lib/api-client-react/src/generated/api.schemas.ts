@@ -93,6 +93,49 @@ export interface B2cLateMatchInput {
   note: string;
 }
 
+export type B2cManualReconcileInputAction = typeof B2cManualReconcileInputAction[keyof typeof B2cManualReconcileInputAction];
+
+
+export const B2cManualReconcileInputAction = {
+  club: 'club',
+  'invoice-note': 'invoice-note',
+  'row-note': 'row-note',
+} as const;
+
+export type B2cManualReconcileInputMode = typeof B2cManualReconcileInputMode[keyof typeof B2cManualReconcileInputMode];
+
+
+export const B2cManualReconcileInputMode = {
+  UPI: 'UPI',
+  CARD: 'CARD',
+} as const;
+
+export type B2cManualReconcileInputDepositsItem = {
+  /** @minLength 1 */
+  batchId: string;
+  /** @minimum 0 */
+  rowIndex: number;
+};
+
+export interface B2cManualReconcileInput {
+  /** @minimum 0 */
+  expectedVersion: number;
+  action: B2cManualReconcileInputAction;
+  paymentBatchId?: string;
+  invoiceNumber?: string;
+  mode?: B2cManualReconcileInputMode;
+  /** @maxItems 20 */
+  deposits?: B2cManualReconcileInputDepositsItem[];
+  depositBatchId?: string;
+  /** @minimum 0 */
+  bankRowIndex?: number;
+  /**
+     * @minLength 1
+     * @maxLength 500
+     */
+  note: string;
+}
+
 export interface UploadUrlInput {
   /** @minLength 1 */
   name: string;

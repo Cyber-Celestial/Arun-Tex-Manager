@@ -8,6 +8,8 @@ import {
   GetWorkspaceStateResponse,
   LateMatchB2cBankBody,
   LateMatchB2cBankResponse,
+  ReconcileB2cBankBody,
+  ReconcileB2cBankResponse,
   ListWorkspaceUsersResponse,
   UpdateAttendanceStateBody,
   UpdateAttendanceStateResponse,
@@ -40,6 +42,7 @@ import { validateDispatchState } from "../lib/dispatch-validation";
 import { removeB2cDay } from "../lib/reconciliation-delete";
 import { applyUpload, type UploadInput } from "../lib/reconciliation-upload";
 import { removeDispatchDay } from "../lib/dispatch-delete";
+import { applyManualReconciliation, type ManualReconcileInput } from "../lib/reconciliation-manual";
 import { appendBankRows, applyLateBankMatch, matchOnlinePayments, sanitizeBankRows, validateB2cRoleChange, validateLateMatchProtection } from "../lib/reconciliation-bank";
 import { reconciliationDate, validateReconciliationChange } from "../lib/reconciliation-policy";
 import { applyBatchWorkflow, countedCash, settleBatch, type Actor } from "../lib/reconciliation-workflow";
@@ -712,6 +715,72 @@ router.put("/workspace/data/b2c/bank/late-match", async (req, res): Promise<void
   res.json(LateMatchB2cBankResponse.parse({
     version: updated[0].version,
     data: b2c,
+  }));
+});
+
+router.put("/workspace/data/b2c/bank/reconcile", async (req, res): Promise<void> => {
+  const user = await requireWorkspaceUser(req, res);
+  if (!user) return;
+  if (user.role !== "admin" && user.role !== "accounts") {
+    res.status(403).json({ error: "Accounts or Admin access is required to reconcile bank deposits." });
+    return;
+  }
+  const parsed = ReconcileB2cBankBody.safeParse(req.body);
+  const body = parsed.success ? parsed.data : undefined;
+  const input: ManualReconcileInput | null = !body ? null
+    : body.action === "club" && body.paymentBatchId && body.invoiceNumber && body.mode && body.deposits
+      ? { action: "club", paymentBatchId: body.paymentBatchId, invoiceNumber: body.invoiceNumber, mode: body.mode, deposits: body.deposits, note: body.note }
+      : body.action === "invoice-note" && body.paymentBatchId && body.invoiceNumber && body.mode
+        ? { action: "invoice-note", paymentBatchId: body.paymentBatchId, invoiceNumber: body.invoiceNumber, mode: body.mode, note: body.note }
+        : body.action === "row-note" && body.depositBatchId && body.bankRowIndex !== undefined
+          ? { action: "row-note", depositBatchId: body.depositBatchId, bankRowIndex: body.bankRowIndex, note: body.note }
+          : null;
+  if (!body || !input) {
+    res.status(400).json({ error: "Choose the payment or deposit and add a note of up to 500 characters." });
+    return;
+  }
+
+  await ensureStateRow();
+  const [current] = await db
+    .select({ b2c: operationsStateTable.b2c, version: operationsStateTable.version })
+    .from(operationsStateTable)
+    .where(eq(operationsStateTable.id, "main"))
+    .limit(1);
+  if (current.version !== body.expectedVersion) {
+    res.status(409).json({ error: "The workspace changed in another session. Refresh and try again." });
+    return;
+  }
+
+  const b2c = structuredClone(current.b2c) as JsonObject;
+  const now = new Date().toISOString();
+  const error = applyManualReconciliation(b2c, input, actorOf(user), now);
+  if (error) {
+    const status = error.includes("could not be found") ? 404
+      : error.includes("already matched") ? 409
+        : error.startsWith("Only") ? 403
+          : 400;
+    res.status(status).json({ error });
+    return;
+  }
+
+  const batches = Array.isArray(b2c.batches) ? b2c.batches.filter(isObject) : [];
+  const touched = input.action === "row-note" ? [input.depositBatchId]
+    : input.action === "club" ? [input.paymentBatchId, ...input.deposits.map(deposit => deposit.batchId)]
+      : [input.paymentBatchId];
+  for (const batch of batches) if (touched.includes(String(batch.id ?? ""))) settleBatch(batch, actorOf(user), now);
+
+  const updated = await db
+    .update(operationsStateTable)
+    .set({ b2c, version: sql`${operationsStateTable.version} + 1` })
+    .where(and(eq(operationsStateTable.id, "main"), eq(operationsStateTable.version, body.expectedVersion)))
+    .returning({ version: operationsStateTable.version });
+  if (!updated[0]) {
+    res.status(409).json({ error: "The workspace changed in another session. Refresh and try again." });
+    return;
+  }
+  res.json(ReconcileB2cBankResponse.parse({
+    version: updated[0].version,
+    data: user.role === "accounts" ? accountsB2cView(b2c) : b2c,
   }));
 });
 
