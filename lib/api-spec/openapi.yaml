@@ -106,6 +106,48 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+  /workspace/data/b2c/bank/reconcile:
+    put:
+      operationId: reconcileB2cBank
+      tags: [workspace]
+      summary: Club deposits to one invoice, or reconcile an invoice or bank row with a note
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/B2cManualReconcileInput"
+      responses:
+        "200":
+          description: Updated B2C state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModuleStateResponse"
+        "400":
+          description: Invalid or ineligible reconciliation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Accounts or Admin role required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Payment or deposit not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Workspace changed or deposit already matched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
   /workspace/data/b2c/upload:
     put:
       operationId: uploadB2cDay
@@ -627,6 +669,45 @@ components:
           minLength: 1
           maxLength: 500
       required: [expectedVersion, paymentBatchId, invoiceNumber, mode, depositBatchId, bankRowIndex, note]
+    B2cManualReconcileInput:
+      type: object
+      properties:
+        expectedVersion:
+          type: integer
+          minimum: 0
+        action:
+          type: string
+          enum: [club, invoice-note, row-note]
+        paymentBatchId:
+          type: string
+        invoiceNumber:
+          type: string
+        mode:
+          type: string
+          enum: [UPI, CARD]
+        deposits:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            properties:
+              batchId:
+                type: string
+                minLength: 1
+              rowIndex:
+                type: integer
+                minimum: 0
+            required: [batchId, rowIndex]
+        depositBatchId:
+          type: string
+        bankRowIndex:
+          type: integer
+          minimum: 0
+        note:
+          type: string
+          minLength: 1
+          maxLength: 500
+      required: [expectedVersion, action, note]
     UploadUrlInput:
       type: object
       properties:

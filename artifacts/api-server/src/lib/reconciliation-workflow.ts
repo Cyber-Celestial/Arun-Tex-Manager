@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import { isReconciliationUploaded } from './reconciliation-policy';
+import { unaccountedBankRows } from './reconciliation-manual';
 
 type RecordValue = Record<string, unknown>;
 export type Actor = { userId: string; name: string; role: string };
@@ -34,7 +35,7 @@ export function countedCash(denominations: unknown): number {
 }
 
 export function onlinePending(batch: RecordValue): boolean {
-  return transactions(batch).some(row => row.type !== 'Return' &&
+  return unaccountedBankRows(batch) > 0 || transactions(batch).some(row => row.type !== 'Return' &&
     (amount(row.upiAmount) > 0 || amount(row.cardAmount) > 0) && row.bankVerified !== true);
 }
 

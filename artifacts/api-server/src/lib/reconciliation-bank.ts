@@ -8,8 +8,8 @@ export type BankRow = {
 };
 
 const MAX_ROWS = 2000;
-const object = (v: unknown): v is RecordValue => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
-const cents = (value: number) => Math.round(value * 100);
+export const object = (v: unknown): v is RecordValue => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
+export const cents = (value: number) => Math.round(value * 100);
 
 export function classifyBankMode(row: RecordValue): 'UPI' | 'CARD' | null {
   const mode = String(row.mode ?? '').toUpperCase();
@@ -75,10 +75,11 @@ export function matchOnlinePayments(data: RecordValue, role: string): void {
 
       const fullyMatched = expected.every(part => matches.some(match => match.mode === part.mode));
       const override = role === 'admin' && transaction.adminOverride === true;
+      const noted = Array.isArray(transaction.lateBankMatches) && transaction.lateBankMatches.some(match => object(match) && match.kind === 'note');
       transaction.bankMatches = matches;
       transaction.bankVerified = fullyMatched || override;
-      transaction.bankTransactionId = matches.length === 1 ? matches[0].reference : null;
-      transaction.bankVerificationStatus = fullyMatched ? 'Matched' : override ? 'Admin override' : 'Missing bank entry';
+      transaction.bankTransactionId = matches.length === 1 ? matches[0].reference || null : null;
+      transaction.bankVerificationStatus = fullyMatched ? (noted ? 'Noted by Admin' : 'Matched') : override ? 'Admin override' : 'Missing bank entry';
     }
   }
 }
@@ -161,9 +162,10 @@ export function validateLateMatchProtection(next: RecordValue, previous: RecordV
     }
     const bankRows: Record<string, unknown> = {};
     (Array.isArray(value.bankRows) ? value.bankRows : []).forEach((entry, index) => {
-      if (object(entry) && object(entry.lateMatch)) {
+      if (object(entry) && (object(entry.lateMatch) || object(entry.manualNote))) {
         bankRows[String(index)] = {
           lateMatch: entry.lateMatch,
+          manualNote: entry.manualNote,
           matchedInvoiceNumber: entry.matchedInvoiceNumber ?? '',
           matchedMode: entry.matchedMode ?? '',
           date: entry.date,

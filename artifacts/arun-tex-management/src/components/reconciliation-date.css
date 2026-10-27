@@ -14,3 +14,13 @@
 .late-match-status small { color:#82877d; font-size:8px; max-width:250px; }
 @media (max-width:640px) { .recon-date-create { align-items:stretch; } .recon-date-create label,.recon-date-create small { flex-basis:100%; } .recon-date-create input { flex:1 1 130px; } .recon-date-create .btn { flex:1 1 180px; } .recon-toolbar .batch-switch { flex-wrap:wrap; max-width:100%; } .recon-toolbar .batch-switch select { min-width:0; max-width:100%; } }
 @media (max-width:640px) { .late-match-form { grid-template-columns:1fr; } .late-match-actions { flex-wrap:wrap; } }
+.reconcile-panel { display:grid; gap:8px; margin:0 0 12px; padding:12px; border:1px solid #e3d9b8; border-radius:7px; background:#fffbee; }
+.reconcile-heading { display:grid; gap:2px; }
+.reconcile-heading small,.reconcile-total { color:#606a63; font:400 11px var(--app-font-sans); }
+.reconcile-line { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:6px 0; border-top:1px solid #efe7cc; font-size:12px; }
+.reconcile-narration { flex:1; min-width:140px; color:#606a63; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.reconcile-actions { margin-left:auto; display:flex; gap:6px; }
+.reconcile-form { grid-template-columns:1fr; }
+.reconcile-picks { display:grid; gap:6px; }
+.reconcile-pick { display:flex; gap:8px; align-items:center; font:400 11px var(--app-font-mono); letter-spacing:normal; }
+.reconcile-total-ok { color:#1f7a4d; font-weight:600; }

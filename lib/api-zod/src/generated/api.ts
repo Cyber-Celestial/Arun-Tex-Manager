@@ -66,6 +66,43 @@ export const UpdateB2cStateResponse = zod.object({
 
 
 /**
+ * @summary Club deposits to one invoice, or reconcile an invoice or bank row with a note
+ */
+export const reconcileB2cBankBodyExpectedVersionMin = 0;
+
+
+export const reconcileB2cBankBodyDepositsItemRowIndexMin = 0;
+
+export const reconcileB2cBankBodyDepositsMax = 20;
+
+export const reconcileB2cBankBodyBankRowIndexMin = 0;
+
+export const reconcileB2cBankBodyNoteMax = 500;
+
+
+
+export const ReconcileB2cBankBody = zod.object({
+  "expectedVersion": zod.number().int().min(reconcileB2cBankBodyExpectedVersionMin),
+  "action": zod.enum(['club', 'invoice-note', 'row-note']),
+  "paymentBatchId": zod.string().optional(),
+  "invoiceNumber": zod.string().optional(),
+  "mode": zod.enum(['UPI', 'CARD']).optional(),
+  "deposits": zod.array(zod.object({
+  "batchId": zod.string().min(1),
+  "rowIndex": zod.number().int().min(reconcileB2cBankBodyDepositsItemRowIndexMin)
+})).max(reconcileB2cBankBodyDepositsMax).optional(),
+  "depositBatchId": zod.string().optional(),
+  "bankRowIndex": zod.number().int().min(reconcileB2cBankBodyBankRowIndexMin).optional(),
+  "note": zod.string().min(1).max(reconcileB2cBankBodyNoteMax)
+})
+
+export const ReconcileB2cBankResponse = zod.object({
+  "version": zod.number().int(),
+  "data": zod.record(zod.string(), zod.unknown())
+})
+
+
+/**
  * @summary Upload one day of Vastra B2C invoices; the date comes from the file (Billing or Admin)
  */
 export const uploadB2cDayBodyExpectedVersionMin = 0;

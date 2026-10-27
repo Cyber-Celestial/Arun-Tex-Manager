@@ -27,6 +27,7 @@ import type {
 import type {
   ApiError,
   B2cLateMatchInput,
+  B2cManualReconcileInput,
   HealthStatus,
   ModuleStateInput,
   ModuleStateResponse,
@@ -454,6 +455,94 @@ export const useUpdateB2cState = <TError = ErrorType<ApiError>,
         TContext
       > => {
       return useMutation(getUpdateB2cStateMutationOptions(options), queryClient);
+    }
+
+export const getReconcileB2cBankUrl = () => {
+
+
+
+
+  return `/api/workspace/data/b2c/bank/reconcile`
+}
+
+/**
+ * @summary Club deposits to one invoice, or reconcile an invoice or bank row with a note
+ */
+export const reconcileB2cBank = async (b2cManualReconcileInput: B2cManualReconcileInput, options?: Parameters<typeof customFetch>[1]): Promise<ModuleStateResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ModuleStateResponse>(getReconcileB2cBankUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(b2cManualReconcileInput)
+  }
+);}
+
+
+
+
+
+export const getReconcileB2cBankMutationKey = () => ['reconcileB2cBank'] as const;
+
+export const getReconcileB2cBankMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reconcileB2cBank>>, TError,ReconcileB2cBankMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof reconcileB2cBank>>, TError,ReconcileB2cBankMutationVariables, TContext> => {
+
+const mutationKey = getReconcileB2cBankMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof reconcileB2cBank>>, ReconcileB2cBankMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  reconcileB2cBank(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReconcileB2cBankMutationResult = NonNullable<Awaited<ReturnType<typeof reconcileB2cBank>>>
+    export type ReconcileB2cBankMutationBody = BodyType<B2cManualReconcileInput>
+    export type ReconcileB2cBankMutationError = ErrorType<ApiError>
+    export type ReconcileB2cBankMutationVariables = {data: BodyType<B2cManualReconcileInput>}
+
+    /**
+ * @summary Club deposits to one invoice, or reconcile an invoice or bank row with a note
+ */
+export const useReconcileB2cBank = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reconcileB2cBank>>, TError,ReconcileB2cBankMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof reconcileB2cBank>>,
+        TError,
+        ReconcileB2cBankMutationVariables,
+        TContext
+      > => {
+      return useMutation(getReconcileB2cBankMutationOptions(options), queryClient);
     }
 
 export const getUploadB2cDayUrl = () => {
