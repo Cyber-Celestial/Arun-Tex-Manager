@@ -302,7 +302,7 @@ function Reconciliation({ state, canEdit, role, save, saveBank, upload, lateMatc
     catch(error:any) { setImportMessage(''); setSaveError(error?.data?.error || error?.message || 'Save failed. Your draft has been kept. Try again.'); return false; }
     finally { busyRef.current=false; setBusy(false); }
   };
-  const update = (next: AnyObj) => runAction(()=>save({ ...state, batches: batches.map((b,i)=>i===selected ? next : b) }));
+  const update = (next: AnyObj, success?: string) => runAction(()=>save({ ...state, batches: batches.map((b,i)=>i===selected ? next : b) }), success);
   const importFile = () => document.getElementById('sales-import')?.click();
   const uploadDay = async (draft:{kind:UploadKind;date:string;fileName:string;transactions:AnyObj[];merged:number;conflicts:string[]}, replace:boolean) => {
     await upload({date:draft.date,fileName:draft.fileName,kind:draft.kind,replace,transactions:draft.transactions});
@@ -374,8 +374,15 @@ function Reconciliation({ state, canEdit, role, save, saveBank, upload, lateMatc
   const denomTotal = Object.entries(active.denominations || {}).reduce((s,[k,v])=>s+Number(k)*Number(v||0),0);
   const canExport=role==='admin'||role==='accounts';
   const exportTally = () => active.status==='Submitted' && downloadTallyWorkbook(active.tallyExport||makeTallyExport(active),String(active.date||'batch').slice(0,10));
-  const submitCash = () => update({...active,billingSubmitted:true});
-  const approveCash = () => update({...active,adminApproved:true});
+  const submitCash = () => update({...active,billingSubmitted:true},'Cash batch submitted. It now waits for Admin approval.');
+  const approveCash = () => update({...active,adminApproved:true},'Cash approved. The day locks once every online payment is bank-verified.');
+  const cents = (value:unknown) => Math.round((Number(value)||0)*100);
+  const unbalanced = tx.filter(t=>t.type!=='Return'&&cents(t.cashAmount)+cents(t.upiAmount)+cents(t.cardAmount)!==cents(t.totalInvoiceAmount)).map(t=>String(t.invoiceNumber));
+  const cashBalanced = cents(denomTotal)===cents(expectedCash);
+  const submitBlock = !uploaded?'Upload the Vastra invoice file first.'
+    : unbalanced.length?`Cash + UPI + card must equal the invoice total for ${unbalanced.slice(0,4).join(', ')}${unbalanced.length>4?` and ${unbalanced.length-4} more`:''}. Fix them in Transactions.`
+    : !cashBalanced?`Counted cash is ${money(Math.abs(denomTotal-expectedCash))} ${denomTotal>expectedCash?'more':'less'} than expected (${money(expectedCash)}). Adjust the notes until it balances.`
+    : '';
   const pending = tx.filter(t=>!t.bankVerified && ['UPI','CARD','SPLIT'].includes(t.paymentMode));
   const batchEditable=canEdit&&hasBatch&&active.status!=='Submitted'&&!busy&&(role==='admin'||!active.billingSubmitted);
   const bankEditable=canBank&&hasBatch&&!busy;
@@ -470,13 +477,14 @@ function Reconciliation({ state, canEdit, role, save, saveBank, upload, lateMatc
           })}</tbody>
         </table></div>:<TableEmpty text="Add UPI or card statement deposits to review bank matches."/>}
       </>}
-      {tab==='Denominations' && <div className="denom-layout"><div><div className="tool-note"><Banknote size={16}/> Cash drawer count</div><p className="tool-hint denom-hint">Enter the number of notes and coins counted at close. Amounts save when you leave a field.{role==='admin'&&active.billingSubmitted&&active.status!=='Submitted'?' Admin edits are recorded in the change log and clear any approval.':''}</p><div className="denom-grid">{['500','200','100','50','20','10','5','2','1'].map(note=><label className="denom-row" key={`${selected}-${note}`}><span className="note-chip">₹{note}</span><span className="mono">×</span><ReconciliationNumberInput value={Number(active.denominations?.[note] ?? 0)} disabled={!batchEditable} label={`${note} rupee notes`} onCommit={value=>setDenom(note,value)}/><span className="mono denom-subtotal">{money(Number(note)*Number(active.denominations?.[note]||0))}</span></label>)}</div></div><div className="denom-summary"><div className="eyebrow">CASH CLOSE</div><strong className="mono">{money(denomTotal)}</strong><span>Physical count</span><div className="summary-line"/><span>Expected from sales less returns</span><b className="mono">{money(expectedCash)}</b><StatusPill tone={denomTotal===expectedCash?'good':'warn'}>{denomTotal===expectedCash?'Balanced':`${money(denomTotal-expectedCash)} variance`}</StatusPill>{active.status==='Submitted'?(canExport&&<Button kind="primary" onClick={exportTally}><FileDown size={15}/> Download Tally Excel</Button>)
+      {tab==='Denominations' && <div className="denom-layout"><div><div className="tool-note"><Banknote size={16}/> Cash drawer count</div><p className="tool-hint denom-hint">Enter the number of notes and coins counted at close. Amounts save when you leave a field.{role==='admin'&&active.billingSubmitted&&active.status!=='Submitted'?' Admin edits are recorded in the change log and clear any approval.':''}</p><div className="denom-grid">{['500','200','100','50','20','10','5','2','1'].map(note=><label className="denom-row" key={`${selected}-${note}`}><span className="note-chip">₹{note}</span><span className="mono">×</span><ReconciliationNumberInput value={Number(active.denominations?.[note] ?? 0)} disabled={!batchEditable} label={`${note} rupee notes`} onCommit={value=>setDenom(note,value)}/><span className="mono denom-subtotal">{money(Number(note)*Number(active.denominations?.[note]||0))}</span></label>)}</div></div><div className="denom-summary"><div className="eyebrow">CASH CLOSE</div><strong className="mono">{money(denomTotal)}</strong><span>Physical count</span><div className="summary-line"/><span>Expected from sales less returns</span><b className="mono">{money(expectedCash)}</b><StatusPill tone={cashBalanced?'good':'warn'}>{cashBalanced?'Balanced':`${money(denomTotal-expectedCash)} variance`}</StatusPill>{active.status==='Submitted'?(canExport&&<Button kind="primary" onClick={exportTally}><FileDown size={15}/> Download Tally Excel</Button>)
           :active.billingSubmitted?<>
             <StatusPill tone="good">Cash submitted{active.billingSubmittedBy?` by ${active.billingSubmittedBy}`:''}</StatusPill>
-            {role==='admin'?(active.adminApproved?<StatusPill tone="good">Approved · waiting for bank verification</StatusPill>:<Button kind="primary" disabled={busy||denomTotal!==expectedCash} onClick={approveCash}><CheckCircle2 size={15}/> Approve cash</Button>)
+            {role==='admin'?(active.adminApproved?<StatusPill tone="good">Approved · waiting for bank verification</StatusPill>:<Button kind="primary" disabled={busy||!cashBalanced} onClick={approveCash}><CheckCircle2 size={15}/> Approve cash</Button>)
               :<small className="tool-hint">{active.adminApproved?'Approved. Waiting for bank verification.':'Waiting for Admin approval.'}</small>}
           </>
-          :<Button kind="primary" disabled={!batchEditable||denomTotal!==expectedCash||!uploaded} onClick={submitCash}><CheckCircle2 size={15}/> Submit cash batch</Button>}</div></div>}
+          :<><Button kind="primary" disabled={!batchEditable||Boolean(submitBlock)} onClick={submitCash}><CheckCircle2 size={15}/> Submit cash batch</Button>{submitBlock&&<small className="tool-hint" data-testid="text-submit-block">{submitBlock}</small>}{!batchEditable&&!submitBlock&&<small className="tool-hint">{busy?'Saving…':'This day can’t be edited by your role right now.'}</small>}</>}
+          {importMessage&&<small className="tool-hint cash-status" role="status" data-testid="text-cash-status">{importMessage}</small>}{saveError&&<small className="recon-error cash-status" role="alert">{saveError}</small>}</div></div>}
     </Panel>
     {role==='admin'&&<ChangeLog entries={arr(active.editLog) as any}/>}
     </>:<div className="b2c-empty"><strong>No B2C for {reconciliationLabel(dayKey)}</strong><p>{canEdit?'Upload a Vastra sales invoice or sales return Excel. The date inside the file decides which day it is saved to, so you can upload any date from here.':role==='accounts'?'Billing uploads the Vastra file for each day. You can also upload a bank statement for this date.':'Nothing has been uploaded for this date.'}</p>{canEdit&&<Button kind="primary" onClick={importFile} disabled={busy}><FileSpreadsheet size={15}/> Upload Excel</Button>}{canBank&&<><input id="bank-import" type="file" accept=".csv,.txt,.xls,.xlsx" hidden data-testid="input-bank-statement" onChange={e=>{handleBankImport(e.target.files?.[0]);e.target.value='';}}/><Button onClick={importBankFile} disabled={busy} data-testid="button-upload-bank-statement-empty-day"><Banknote size={15}/> Upload bank statement</Button></>}</div>}
