@@ -34,8 +34,30 @@ app.use(
 );
 
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
-app.use(cors({ credentials: true, origin: true }));
-app.use(express.json());
+// Credentialed CORS only for same-origin requests and explicitly allowed origins
+// (comma-separated CORS_ALLOWED_ORIGINS). Any other origin gets no CORS headers.
+const allowedOrigins = new Set(
+  (process.env.CORS_ALLOWED_ORIGINS ?? "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+);
+app.use(
+  cors((req, callback) => {
+    const origin = req.headers.origin;
+    let allowed = !origin || allowedOrigins.has(origin);
+    if (origin && !allowed) {
+      try {
+        allowed = new URL(origin).host === getClerkProxyHost(req);
+      } catch {
+        allowed = false;
+      }
+    }
+    callback(null, { credentials: true, origin: allowed });
+  }),
+);
+// Each save sends a whole module's data, so the default 100 KB limit is too small.
+app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(
   clerkMiddleware((req) => ({

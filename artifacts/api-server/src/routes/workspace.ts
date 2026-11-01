@@ -34,7 +34,7 @@ import {
   type WorkspaceRole,
   type WorkspaceUser,
 } from "@workspace/db";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
@@ -96,6 +96,10 @@ async function requireWorkspaceUser(
     profile.username ||
     [profile.firstName, profile.lastName].filter(Boolean).join(" ") ||
     "Team member";
+  const verifiedEmail =
+    profile.primaryEmailAddress?.verification?.status === "verified"
+      ? profile.primaryEmailAddress.emailAddress
+      : undefined;
   const email =
     profile.primaryEmailAddress?.emailAddress ||
     profile.emailAddresses[0]?.emailAddress ||
@@ -141,13 +145,23 @@ async function requireWorkspaceUser(
         userId,
         name,
         email,
-        role: firstAdmin ? "pending" : "admin",
+        role: firstAdmin || !mayBootstrapAdmin(verifiedEmail) ? "pending" : "admin",
       })
       .returning();
     return created;
   });
 
   return member;
+}
+
+/**
+ * The first account becomes Admin. When INITIAL_ADMIN_EMAIL is set, only that
+ * verified email may claim the role, so a stranger cannot take an empty workspace.
+ */
+function mayBootstrapAdmin(verifiedEmail: string | undefined): boolean {
+  const required = process.env.INITIAL_ADMIN_EMAIL?.trim().toLowerCase();
+  if (!required) return true;
+  return verifiedEmail?.toLowerCase() === required;
 }
 
 async function ensureStateRow(): Promise<void> {
@@ -989,26 +1003,39 @@ router.patch("/workspace/users/:userId", async (req, res): Promise<void> => {
     return;
   }
 
-  if (
-    params.data.userId === admin.userId &&
-    body.data.role !== "admin"
-  ) {
-    const [otherAdmin] = await db
-      .select({ userId: workspaceUsersTable.userId })
-      .from(workspaceUsersTable)
-      .where(eq(workspaceUsersTable.role, "admin"))
-      .limit(2);
-    if (!otherAdmin || otherAdmin.userId === admin.userId) {
-      res.status(400).json({ error: "The workspace must keep at least one Admin." });
-      return;
+  const selfDemotion =
+    params.data.userId === admin.userId && body.data.role !== "admin";
+  const updated = await db.transaction(async (tx) => {
+    if (selfDemotion) {
+      // Serialize self-demotions so two admins cannot demote each other at once.
+      await tx
+        .select({ id: operationsStateTable.id })
+        .from(operationsStateTable)
+        .where(eq(operationsStateTable.id, "main"))
+        .for("update");
+      const [otherAdmin] = await tx
+        .select({ userId: workspaceUsersTable.userId })
+        .from(workspaceUsersTable)
+        .where(
+          and(
+            eq(workspaceUsersTable.role, "admin"),
+            ne(workspaceUsersTable.userId, admin.userId),
+          ),
+        )
+        .limit(1);
+      if (!otherAdmin) return "last-admin" as const;
     }
+    const [row] = await tx
+      .update(workspaceUsersTable)
+      .set({ role: body.data.role })
+      .where(eq(workspaceUsersTable.userId, params.data.userId))
+      .returning();
+    return row;
+  });
+  if (updated === "last-admin") {
+    res.status(400).json({ error: "The workspace must keep at least one Admin." });
+    return;
   }
-
-  const [updated] = await db
-    .update(workspaceUsersTable)
-    .set({ role: body.data.role })
-    .where(eq(workspaceUsersTable.userId, params.data.userId))
-    .returning();
   if (!updated) {
     res.status(404).json({ error: "Workspace user not found." });
     return;

@@ -51,3 +51,16 @@ test('duplicates are rejected and old manual records remain compatible', () => {
   assert.match(validateDispatchState({invoices:[invoice(),invoice()]})!, /already exists/);
   assert.equal(validateDispatchState({invoices:[{invoiceNumber:'legacy',status:'Pending'}]}), null);
 });
+
+test('rejects malformed LR and courier document references', () => {
+  for (const key of ['lrPdfObjectPath', 'courierPdfObjectPath', 'invoicePdfObjectPath']) {
+    assert.match(
+      String(validateDispatchState({ invoices: [{ invoiceNumber: 'A1', [key]: '/objects/../secret' }] })),
+      /Invalid private document reference/,
+    );
+  }
+  assert.equal(
+    validateDispatchState({ invoices: [{ invoiceNumber: 'A1', lrPdfObjectPath: '/objects/uploads/123e4567-e89b-12d3-a456-426614174000' }] }),
+    null,
+  );
+});

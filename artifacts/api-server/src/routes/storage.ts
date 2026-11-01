@@ -84,8 +84,12 @@ router.get("/storage/objects/*path", async (req, res): Promise<void> => {
     const response = await storage.downloadObject(file, 60);
     res.status(response.status);
     response.headers.forEach((value, key) => res.setHeader(key, value));
+    // Uploads go straight to storage via a signed URL, so stored bytes and
+    // headers are not trusted. Always serve them as an inert PDF.
+    res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", "inline");
     res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Security-Policy", "sandbox; default-src 'none'");
     if (response.body) {
       Readable.fromWeb(response.body as ReadableStream<Uint8Array>).pipe(res);
     } else {

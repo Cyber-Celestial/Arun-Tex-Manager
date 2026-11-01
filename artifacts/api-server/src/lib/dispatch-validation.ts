@@ -53,7 +53,11 @@ export function validateDispatchState(data: JsonObject, previous?: JsonObject): 
       if (m.ack_number && !/^\d{15}$/.test(String(m.ack_number))) return 'Acknowledgement number must contain 15 digits.';
       if (m.total !== null && (typeof m.total !== 'number' || !Number.isFinite(m.total) || m.total < 0))
         return 'Invoice total must be a valid non-negative number.';
-      if (value.invoicePdfObjectPath && !privatePath.test(String(value.invoicePdfObjectPath))) return 'Invalid private invoice document reference.';
+    }
+    for (const key of ['invoicePdfObjectPath', 'lrPdfObjectPath', 'courierPdfObjectPath'] as const) {
+      const ref = value[key];
+      if (ref !== undefined && ref !== null && ref !== '' && !privatePath.test(String(ref)))
+        return 'Invalid private document reference.';
     }
     if (value.eWayDone === true && !eway.test(String(value.eWayBillNumber ?? '')))
       return 'Enter a 12-digit E-Way Bill number before confirming E-Way compliance.';
